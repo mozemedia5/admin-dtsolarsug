@@ -50,14 +50,16 @@ export const logout = async (): Promise<void> => {
 
 /**
  * Check if user is an admin
+ * FIXED: Now checks the 'users' collection to match Firestore rules
  */
 export const checkAdminStatus = async (uid: string): Promise<boolean> => {
   try {
-    const adminDoc = await getDoc(doc(db, 'admins', uid));
-    if (!adminDoc.exists()) return false;
+    const userDoc = await getDoc(doc(db, 'users', uid));
+    if (!userDoc.exists()) return false;
     
-    const adminData = adminDoc.data() as AdminUser;
-    return adminData.isActive;
+    const userData = userDoc.data();
+    // Check if role is either 'admin' or 'super_admin'
+    return userData.role === 'admin' || userData.role === 'super_admin';
   } catch (error) {
     console.error('Error checking admin status:', error);
     return false;
@@ -66,13 +68,20 @@ export const checkAdminStatus = async (uid: string): Promise<boolean> => {
 
 /**
  * Get admin user data
+ * FIXED: Now checks the 'users' collection to match Firestore rules
  */
 export const getAdminUser = async (uid: string): Promise<AdminUser | null> => {
   try {
-    const adminDoc = await getDoc(doc(db, 'admins', uid));
-    if (!adminDoc.exists()) return null;
+    const userDoc = await getDoc(doc(db, 'users', uid));
+    if (!userDoc.exists()) return null;
     
-    return adminDoc.data() as AdminUser;
+    const userData = userDoc.data();
+    // Only return if user has admin role
+    if (userData.role !== 'admin' && userData.role !== 'super_admin') {
+      return null;
+    }
+    
+    return userData as AdminUser;
   } catch (error) {
     console.error('Error fetching admin user:', error);
     return null;
@@ -89,6 +98,7 @@ export const isSuperAdmin = async (uid: string): Promise<boolean> => {
 
 /**
  * Create a new admin user (only super admin can do this)
+ * FIXED: Now creates user in 'users' collection to match Firestore rules
  */
 export const createAdminUser = async (
   email: string,
@@ -107,8 +117,8 @@ export const createAdminUser = async (
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const newUser = userCredential.user;
 
-    // Create admin record in Firestore
-    const adminData: AdminUser = {
+    // Create user record in Firestore 'users' collection
+    const userData: AdminUser = {
       uid: newUser.uid,
       email: email,
       role: 'admin',
@@ -118,7 +128,7 @@ export const createAdminUser = async (
       isActive: true
     };
 
-    await setDoc(doc(db, 'admins', newUser.uid), adminData);
+    await setDoc(doc(db, 'users', newUser.uid), userData);
 
     // Sign out the newly created user (so the super admin stays logged in)
     await signOut(auth);
@@ -130,11 +140,12 @@ export const createAdminUser = async (
 /**
  * Initialize super admin account
  * This should be called once to set up the first administrator
+ * FIXED: Now creates user in 'users' collection to match Firestore rules
  */
 export const initializeSuperAdmin = async (password: string): Promise<void> => {
   try {
     // Check if super admin already exists
-    const q = query(collection(db, 'admins'), where('role', '==', 'super_admin'));
+    const q = query(collection(db, 'users'), where('role', '==', 'super_admin'));
     const querySnapshot = await getDocs(q);
     
     if (!querySnapshot.empty) {
@@ -146,8 +157,8 @@ export const initializeSuperAdmin = async (password: string): Promise<void> => {
     const userCredential = await createUserWithEmailAndPassword(auth, SUPER_ADMIN_EMAIL, password);
     const superAdmin = userCredential.user;
 
-    // Create super admin record in Firestore
-    const adminData: AdminUser = {
+    // Create super admin record in Firestore 'users' collection
+    const userData: AdminUser = {
       uid: superAdmin.uid,
       email: SUPER_ADMIN_EMAIL,
       role: 'super_admin',
@@ -156,7 +167,7 @@ export const initializeSuperAdmin = async (password: string): Promise<void> => {
       isActive: true
     };
 
-    await setDoc(doc(db, 'admins', superAdmin.uid), adminData);
+    await setDoc(doc(db, 'users', superAdmin.uid), userData);
     
     console.log('Super admin initialized successfully');
   } catch (error: any) {
@@ -166,10 +177,15 @@ export const initializeSuperAdmin = async (password: string): Promise<void> => {
 
 /**
  * Get all admin users
+ * FIXED: Now queries the 'users' collection to match Firestore rules
  */
 export const getAllAdmins = async (): Promise<AdminUser[]> => {
   try {
-    const adminsSnapshot = await getDocs(collection(db, 'admins'));
+    const q = query(
+      collection(db, 'users'),
+      where('role', 'in', ['admin', 'super_admin'])
+    );
+    const adminsSnapshot = await getDocs(q);
     return adminsSnapshot.docs.map(doc => doc.data() as AdminUser);
   } catch (error) {
     console.error('Error fetching admins:', error);
@@ -179,6 +195,7 @@ export const getAllAdmins = async (): Promise<AdminUser[]> => {
 
 /**
  * Update admin user status
+ * FIXED: Now updates the 'users' collection to match Firestore rules
  */
 export const updateAdminStatus = async (
   uid: string,
@@ -197,13 +214,14 @@ export const updateAdminStatus = async (
     throw new Error('Cannot deactivate super admin account');
   }
 
-  await updateDoc(doc(db, 'admins', uid), {
+  await updateDoc(doc(db, 'users', uid), {
     isActive: isActive
   });
 };
 
 /**
  * Delete admin user
+ * FIXED: Now deletes from the 'users' collection to match Firestore rules
  */
 export const deleteAdminUser = async (
   uid: string,
@@ -221,7 +239,7 @@ export const deleteAdminUser = async (
     throw new Error('Cannot delete super admin account');
   }
 
-  await deleteDoc(doc(db, 'admins', uid));
+  await deleteDoc(doc(db, 'users', uid));
 };
 
 /**
