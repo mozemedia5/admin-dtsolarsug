@@ -5,7 +5,7 @@ import {
   type User,
   createUserWithEmailAndPassword
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { auth, db } from './firebase';
 
 export interface AdminUser {
@@ -13,7 +13,7 @@ export interface AdminUser {
   email: string;
   role: 'super_admin' | 'admin';
   displayName: string;
-  createdAt: Date;
+  createdAt: any;
   createdBy?: string;
   isActive: boolean;
 }
@@ -32,11 +32,12 @@ export const loginWithEmail = async (email: string, password: string): Promise<U
     const isAdmin = await checkAdminStatus(userCredential.user.uid);
     if (!isAdmin) {
       await signOut(auth);
-      throw new Error('Access denied. This account does not have admin privileges.');
+      throw new Error('Access denied. This account does not have admin privileges or is inactive.');
     }
     
     return userCredential.user;
   } catch (error: any) {
+    console.error('Login error:', error);
     throw new Error(error.message || 'Login failed');
   }
 };
@@ -55,11 +56,17 @@ export const logout = async (): Promise<void> => {
 export const checkAdminStatus = async (uid: string): Promise<boolean> => {
   try {
     const userDoc = await getDoc(doc(db, 'users', uid));
-    if (!userDoc.exists()) return false;
+    if (!userDoc.exists()) {
+      console.warn(`User document not found for UID: ${uid}`);
+      return false;
+    }
     
     const userData = userDoc.data();
-    // Check if role is either 'admin' or 'super_admin'
-    return userData.role === 'admin' || userData.role === 'super_admin';
+    // Check if role is either 'admin' or 'super_admin' AND isActive is true
+    const hasAdminRole = userData.role === 'admin' || userData.role === 'super_admin';
+    const isActive = userData.isActive !== false; // Default to true if field is missing
+    
+    return hasAdminRole && isActive;
   } catch (error) {
     console.error('Error checking admin status:', error);
     return false;
@@ -81,7 +88,15 @@ export const getAdminUser = async (uid: string): Promise<AdminUser | null> => {
       return null;
     }
     
-    return userData as AdminUser;
+    return {
+      uid: userData.uid || uid,
+      email: userData.email || '',
+      role: userData.role,
+      displayName: userData.displayName || 'Admin User',
+      createdAt: userData.createdAt,
+      createdBy: userData.createdBy,
+      isActive: userData.isActive !== false
+    } as AdminUser;
   } catch (error) {
     console.error('Error fetching admin user:', error);
     return null;
@@ -123,7 +138,7 @@ export const createAdminUser = async (
       email: email,
       role: 'admin',
       displayName: displayName,
-      createdAt: new Date(),
+      createdAt: Timestamp.now(),
       createdBy: createdByUid,
       isActive: true
     };
@@ -163,7 +178,7 @@ export const initializeSuperAdmin = async (password: string): Promise<void> => {
       email: SUPER_ADMIN_EMAIL,
       role: 'super_admin',
       displayName: 'Super Administrator',
-      createdAt: new Date(),
+      createdAt: Timestamp.now(),
       isActive: true
     };
 
@@ -186,7 +201,13 @@ export const getAllAdmins = async (): Promise<AdminUser[]> => {
       where('role', 'in', ['admin', 'super_admin'])
     );
     const adminsSnapshot = await getDocs(q);
-    return adminsSnapshot.docs.map(doc => doc.data() as AdminUser);
+    return adminsSnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        uid: doc.id,
+        ...data
+      } as AdminUser;
+    });
   } catch (error) {
     console.error('Error fetching admins:', error);
     return [];
