@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Badge } from '@/components/ui/badge';
 import { Plus, Edit, Trash2, Tag, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ImageInput } from '@/components/admin/ImageInput';
 
 export default function AdminPromotions() {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
@@ -168,12 +169,11 @@ export default function AdminPromotions() {
                 </div>
 
                 <div className="col-span-2">
-                  <Label className="text-slate-300">Banner Image URL</Label>
-                  <Input
+                  <ImageInput
                     value={formData.image}
-                    onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white"
-                    placeholder="/images/promotions/banner.jpg"
+                    onChange={(value) => setFormData({ ...formData, image: value })}
+                    label="Banner Image"
+                    placeholder="https://example.com/banner.jpg or /images/banner.jpg"
                     required
                   />
                 </div>

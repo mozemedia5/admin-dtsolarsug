@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Plus, Edit, Trash2, Package, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ImageInput } from '@/components/admin/ImageInput';
 
 export default function AdminProducts() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -218,12 +219,11 @@ export default function AdminProducts() {
                 </div>
 
                 <div className="col-span-2">
-                  <Label className="text-slate-300">Image URL</Label>
-                  <Input
+                  <ImageInput
                     value={formData.image}
-                    onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white"
-                    placeholder="/images/products/product.jpg"
+                    onChange={(value) => setFormData({ ...formData, image: value })}
+                    label="Product Image"
+                    placeholder="https://example.com/image.jpg or /images/product.jpg"
                     required
                   />
                 </div>
