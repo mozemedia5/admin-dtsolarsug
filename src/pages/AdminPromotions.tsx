@@ -13,7 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, Tag, Loader2 } from 'lucide-react';
+import { Plus, Edit, Trash2, Tag, Loader2, Calendar } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ImageInput } from '@/components/admin/ImageInput';
 
@@ -153,6 +153,7 @@ export default function AdminPromotions() {
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                     className="bg-slate-800 border-slate-700 text-white"
+                    placeholder="e.g., Summer Sale"
                     required
                   />
                 </div>
@@ -164,6 +165,7 @@ export default function AdminPromotions() {
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     className="bg-slate-800 border-slate-700 text-white"
                     rows={3}
+                    placeholder="Enter promotion details..."
                     required
                   />
                 </div>
@@ -184,7 +186,7 @@ export default function AdminPromotions() {
                     value={formData.discount}
                     onChange={(e) => setFormData({ ...formData, discount: e.target.value })}
                     className="bg-slate-800 border-slate-700 text-white"
-                    placeholder="15% OFF"
+                    placeholder="e.g., 15% OFF"
                     required
                   />
                 </div>
@@ -195,7 +197,7 @@ export default function AdminPromotions() {
                     value={formData.code}
                     onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
                     className="bg-slate-800 border-slate-700 text-white"
-                    placeholder="PROMO15"
+                    placeholder="e.g., PROMO15"
                     required
                   />
                 </div>
@@ -250,31 +252,44 @@ export default function AdminPromotions() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {promotions.map((promotion) => (
-          <Card key={promotion.id} className="bg-slate-900 border-slate-800">
+          <Card key={promotion.id} className="bg-slate-900 border-slate-800 overflow-hidden">
+            <div className="aspect-[21/9] w-full bg-slate-800 relative">
+              <img 
+                src={promotion.image} 
+                alt={promotion.title}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = 'https://via.placeholder.com/800x340?text=Promotion+Banner';
+                }}
+              />
+              <div className="absolute top-2 right-2">
+                {isActive(promotion.validUntil) ? (
+                  <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Active</Badge>
+                ) : (
+                  <Badge className="bg-red-500/20 text-red-400 border-red-500/30">Expired</Badge>
+                )}
+              </div>
+            </div>
             <CardHeader>
               <div className="flex items-start justify-between">
                 <CardTitle className="text-white text-lg">{promotion.title}</CardTitle>
-                {isActive(promotion.validUntil) ? (
-                  <Badge className="bg-green-500/20 text-green-400">Active</Badge>
-                ) : (
-                  <Badge className="bg-red-500/20 text-red-400">Expired</Badge>
-                )}
+                <span className="text-orange-500 font-bold">{promotion.discount}</span>
               </div>
             </CardHeader>
             <CardContent>
-              <p className="text-slate-400 text-sm mb-3">{promotion.description}</p>
+              <p className="text-slate-400 text-sm mb-4 line-clamp-2">{promotion.description}</p>
               <div className="space-y-2 mb-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 text-sm">Discount:</span>
-                  <span className="text-orange-500 font-bold">{promotion.discount}</span>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500 flex items-center gap-1">
+                    <Tag className="w-3 h-3" /> Code:
+                  </span>
+                  <Badge variant="outline" className="font-mono border-slate-700 text-slate-300">{promotion.code}</Badge>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 text-sm">Code:</span>
-                  <Badge variant="outline" className="font-mono">{promotion.code}</Badge>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 text-sm">Valid Until:</span>
-                  <span className="text-slate-300 text-sm">{new Date(promotion.validUntil).toLocaleDateString()}</span>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500 flex items-center gap-1">
+                    <Calendar className="w-3 h-3" /> Valid Until:
+                  </span>
+                  <span className="text-slate-300">{new Date(promotion.validUntil).toLocaleDateString()}</span>
                 </div>
               </div>
               <div className="flex gap-2">

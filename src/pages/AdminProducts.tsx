@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, Package, Loader2 } from 'lucide-react';
+import { Plus, Edit, Trash2, Package, Loader2, Star } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ImageInput } from '@/components/admin/ImageInput';
 
@@ -30,11 +30,9 @@ export default function AdminProducts() {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    price: 0,
+    price: '',
     category: '',
     image: '',
-    rating: 0,
-    reviews: 0,
     inStock: true,
     features: ''
   });
@@ -63,14 +61,21 @@ export default function AdminProducts() {
     try {
       const productData: any = {
         ...formData,
+        price: Number(formData.price),
         features: formData.features.split('\n').filter(f => f.trim()),
         images: [formData.image]
       };
 
       if (editingProduct) {
+        // Keep existing rating and reviews when editing
+        productData.rating = editingProduct.rating || 0;
+        productData.reviews = editingProduct.reviews || 0;
         await updateProduct(editingProduct.id, productData);
         setSuccess('Product updated successfully');
       } else {
+        // Initialize rating and reviews for new products
+        productData.rating = 0;
+        productData.reviews = 0;
         await createProduct(productData);
         setSuccess('Product created successfully');
       }
@@ -88,11 +93,9 @@ export default function AdminProducts() {
     setFormData({
       name: product.name,
       description: product.description,
-      price: product.price,
+      price: product.price.toString(),
       category: product.category,
       image: product.image,
-      rating: product.rating,
-      reviews: product.reviews,
       inStock: product.inStock,
       features: product.features?.join('\n') || ''
     });
@@ -116,11 +119,9 @@ export default function AdminProducts() {
     setFormData({
       name: '',
       description: '',
-      price: 0,
+      price: '',
       category: '',
       image: '',
-      rating: 0,
-      reviews: 0,
       inStock: true,
       features: ''
     });
@@ -193,8 +194,9 @@ export default function AdminProducts() {
                   <Input
                     type="number"
                     value={formData.price}
-                    onChange={(e) => setFormData({ ...formData, price: Number(e.target.value) })}
+                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                     className="bg-slate-800 border-slate-700 text-white"
+                    placeholder="Enter price"
                     required
                   />
                 </div>
@@ -228,29 +230,6 @@ export default function AdminProducts() {
                   />
                 </div>
 
-                <div>
-                  <Label className="text-slate-300">Rating (0-5)</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="5"
-                    value={formData.rating}
-                    onChange={(e) => setFormData({ ...formData, rating: Number(e.target.value) })}
-                    className="bg-slate-800 border-slate-700 text-white"
-                  />
-                </div>
-
-                <div>
-                  <Label className="text-slate-300">Number of Reviews</Label>
-                  <Input
-                    type="number"
-                    value={formData.reviews}
-                    onChange={(e) => setFormData({ ...formData, reviews: Number(e.target.value) })}
-                    className="bg-slate-800 border-slate-700 text-white"
-                  />
-                </div>
-
                 <div className="col-span-2">
                   <Label className="text-slate-300">Features (one per line)</Label>
                   <Textarea
@@ -265,11 +244,12 @@ export default function AdminProducts() {
                 <div className="col-span-2 flex items-center gap-2">
                   <input
                     type="checkbox"
+                    id="inStock"
                     checked={formData.inStock}
                     onChange={(e) => setFormData({ ...formData, inStock: e.target.checked })}
                     className="w-4 h-4"
                   />
-                  <Label className="text-slate-300">In Stock</Label>
+                  <Label htmlFor="inStock" className="text-slate-300">In Stock</Label>
                 </div>
               </div>
 
@@ -311,32 +291,48 @@ export default function AdminProducts() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {products.map((product) => (
-          <Card key={product.id} className="bg-slate-900 border-slate-800">
+          <Card key={product.id} className="bg-slate-900 border-slate-800 overflow-hidden">
+            <div className="aspect-video w-full bg-slate-800 relative">
+              <img 
+                src={product.image} 
+                alt={product.name}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x225?text=No+Image';
+                }}
+              />
+              <div className="absolute top-2 right-2">
+                {product.inStock ? (
+                  <Badge className="bg-green-500/20 text-green-400 border-green-500/30">In Stock</Badge>
+                ) : (
+                  <Badge className="bg-red-500/20 text-red-400 border-red-500/30">Out of Stock</Badge>
+                )}
+              </div>
+            </div>
             <CardHeader>
               <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <CardTitle className="text-white text-lg mb-2">{product.name}</CardTitle>
-                  <Badge variant="outline" className="text-xs">
-                    {categories.find(c => c.value === product.category)?.label}
-                  </Badge>
+                <div>
+                  <CardTitle className="text-white text-lg">{product.name}</CardTitle>
+                  <p className="text-sm text-slate-500 capitalize">{product.category.replace('-', ' ')}</p>
                 </div>
-                {product.inStock ? (
-                  <Badge className="bg-green-500/20 text-green-400">In Stock</Badge>
-                ) : (
-                  <Badge className="bg-red-500/20 text-red-400">Out of Stock</Badge>
-                )}
+                <div className="text-right">
+                  <p className="text-orange-500 font-bold">UGX {product.price.toLocaleString()}</p>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
-              <p className="text-slate-400 text-sm mb-3 line-clamp-2">{product.description}</p>
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-orange-500 font-bold text-lg">
-                  UGX {product.price.toLocaleString()}
-                </span>
-                <span className="text-slate-400 text-sm">
-                  ⭐ {product.rating} ({product.reviews})
-                </span>
+              <p className="text-slate-400 text-sm line-clamp-2 mb-4">{product.description}</p>
+              
+              <div className="flex items-center gap-4 mb-4 text-sm">
+                <div className="flex items-center gap-1 text-amber-500">
+                  <Star className="w-4 h-4 fill-amber-500" />
+                  <span>{product.rating?.toFixed(1) || '0.0'}</span>
+                </div>
+                <div className="text-slate-500">
+                  {product.reviews || 0} reviews
+                </div>
               </div>
+
               <div className="flex gap-2">
                 <Button
                   size="sm"
@@ -366,7 +362,7 @@ export default function AdminProducts() {
         <Card className="bg-slate-900 border-slate-800">
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Package className="w-16 h-16 text-slate-600 mb-4" />
-            <p className="text-slate-400 text-lg">No products yet</p>
+            <p className="text-slate-400 text-lg">No products found</p>
             <p className="text-slate-500 text-sm">Add your first product to get started</p>
           </CardContent>
         </Card>
