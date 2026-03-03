@@ -67,13 +67,17 @@ export default function AdminProducts() {
       };
 
       if (editingProduct) {
-        // Keep existing rating and reviews when editing
-        productData.rating = editingProduct.rating || 0;
-        productData.reviews = editingProduct.reviews || 0;
+        // Keep existing rating and reviews when editing (managed by customer reviews)
+        if (editingProduct.rating !== undefined) {
+          productData.rating = editingProduct.rating;
+        }
+        if (editingProduct.reviews !== undefined) {
+          productData.reviews = editingProduct.reviews;
+        }
         await updateProduct(editingProduct.id, productData);
         setSuccess('Product updated successfully');
       } else {
-        // Initialize rating and reviews for new products
+        // Initialize rating and reviews for new products (will be updated by customer reviews)
         productData.rating = 0;
         productData.reviews = 0;
         await createProduct(productData);
@@ -323,15 +327,17 @@ export default function AdminProducts() {
             <CardContent>
               <p className="text-slate-400 text-sm line-clamp-2 mb-4">{product.description}</p>
               
-              <div className="flex items-center gap-4 mb-4 text-sm">
-                <div className="flex items-center gap-1 text-amber-500">
-                  <Star className="w-4 h-4 fill-amber-500" />
-                  <span>{product.rating?.toFixed(1) || '0.0'}</span>
+              {(product.rating !== undefined && product.reviews !== undefined && product.reviews > 0) && (
+                <div className="flex items-center gap-4 mb-4 text-sm">
+                  <div className="flex items-center gap-1 text-amber-500">
+                    <Star className="w-4 h-4 fill-amber-500" />
+                    <span>{product.rating?.toFixed(1) || '0.0'}</span>
+                  </div>
+                  <div className="text-slate-500">
+                    {product.reviews || 0} reviews
+                  </div>
                 </div>
-                <div className="text-slate-500">
-                  {product.reviews || 0} reviews
-                </div>
-              </div>
+              )}
 
               <div className="flex gap-2">
                 <Button
