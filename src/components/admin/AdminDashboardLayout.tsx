@@ -57,7 +57,7 @@ export default function AdminDashboardLayout({
   ];
 
   // Only show admin management for super admin
-  if (adminUser?.role === 'super_admin') {
+  if (adminUser?.isSuperAdmin) {
     navigation.push({ name: 'Admin Users', icon: Users, page: 'admins' });
   }
 
@@ -80,8 +80,8 @@ export default function AdminDashboardLayout({
           
           <div className="flex items-center gap-3">
             <div className="hidden sm:block text-right">
-              <p className="text-sm font-medium text-white">{adminUser?.displayName}</p>
-              <p className="text-xs text-slate-400 capitalize">{adminUser?.role?.replace('_', ' ')}</p>
+              <p className="text-sm font-medium text-white">{adminUser?.name}</p>
+              <p className="text-xs text-slate-400">{adminUser?.isSuperAdmin ? 'Super Administrator' : 'Administrator'}</p>
             </div>
             <Button
               variant="ghost"
