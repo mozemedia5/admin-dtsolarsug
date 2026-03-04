@@ -177,39 +177,67 @@ vercel env pull
 
 ### Firestore Security Rules
 
+⚠️ **CRITICAL**: The rules below are corrected to use the `users` collection (not `admins`). See [FIRESTORE_RULES_FIX.md](./FIRESTORE_RULES_FIX.md) for details.
+
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Helper function to check if user is an active admin
+    function isActiveAdmin() {
+      return request.auth != null &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_admin'] &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+    }
+    
+    // Helper function to check if user is super admin
+    function isSuperAdmin() {
+      return request.auth != null &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin' &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+    }
+    
+    // Users collection (for admin authentication)
+    match /users/{userId} {
+      // Users can read their own document
+      allow read: if request.auth != null && request.auth.uid == userId;
+      
+      // Only super admin can list all users/admins
+      allow list: if isSuperAdmin();
+      
+      // Only super admin can create, update, or delete users
+      allow create, update, delete: if isSuperAdmin();
+    }
+    
     // Products collection
     match /products/{productId} {
+      // Anyone can read products
       allow read: if true;
-      allow write: if request.auth != null && 
-                      get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.isActive == true;
+      
+      // Only active admins can create, update, or delete products
+      allow write: if isActiveAdmin();
     }
     
     // Promotions collection
     match /promotions/{promotionId} {
+      // Anyone can read promotions
       allow read: if true;
-      allow write: if request.auth != null && 
-                      get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.isActive == true;
+      
+      // Only active admins can create, update, or delete promotions
+      allow write: if isActiveAdmin();
     }
     
     // Reviews collection
     match /reviews/{reviewId} {
+      // Anyone can read verified reviews
       allow read: if resource.data.verified == true;
+      
+      // Anyone can create a review (from client site)
       allow create: if true;
-      allow update, delete: if request.auth != null && 
-                              get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.isActive == true;
-    }
-    
-    // Admins collection
-    match /admins/{adminId} {
-      allow read: if request.auth != null && request.auth.uid == adminId;
-      allow list: if request.auth != null && 
-                     get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'super_admin';
-      allow create, update, delete: if request.auth != null && 
-                                        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'super_admin';
+      
+      // Only active admins can update or delete reviews
+      allow update, delete: if isActiveAdmin();
     }
   }
 }

@@ -108,34 +108,52 @@ Both branches are pushed to GitHub and ready to use!
    - Select your region
 
 5. **Set Firestore Security Rules:**
+
+⚠️ **IMPORTANT**: Use the corrected rules that reference the `users` collection (not `admins`). See [FIRESTORE_RULES_FIX.md](./FIRESTORE_RULES_FIX.md) for full details.
+
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Admin users
-    match /admins/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && 
-        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'super_admin';
+    
+    // Helper function to check if user is an active admin
+    function isActiveAdmin() {
+      return request.auth != null &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_admin'] &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+    }
+    
+    // Helper function to check if user is super admin
+    function isSuperAdmin() {
+      return request.auth != null &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin' &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+    }
+    
+    // Users collection (for admin authentication)
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow list: if isSuperAdmin();
+      allow create, update, delete: if isSuperAdmin();
     }
     
     // Products - anyone can read, only admins can write
     match /products/{productId} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isActiveAdmin();
     }
     
     // Promotions
     match /promotions/{promotionId} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isActiveAdmin();
     }
     
     // Reviews
     match /reviews/{reviewId} {
-      allow read: if true;
+      allow read: if resource.data.verified == true;
       allow create: if true;
-      allow update, delete: if request.auth != null;
+      allow update, delete: if isActiveAdmin();
     }
   }
 }
@@ -151,7 +169,7 @@ service cloud.firestore {
 4. Copy the UID
 
 5. Go to Firestore Database → Start Collection
-6. Collection ID: `admins`
+6. Collection ID: `users` ⚠️ **IMPORTANT: Must be `users` not `admins`**
 7. Document ID: (paste the UID)
 8. Add fields:
    - `uid`: (paste UID again)
