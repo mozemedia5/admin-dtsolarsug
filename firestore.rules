@@ -5,27 +5,39 @@ service cloud.firestore {
     // Helper function to check if user is an active admin
     function isActiveAdmin() {
       return request.auth != null &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_admin'] &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+             exists(/databases/$(database)/documents/administrators/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/administrators/$(request.auth.uid)).data.isActiveAdmin == true;
     }
     
     // Helper function to check if user is super admin
     function isSuperAdmin() {
       return request.auth != null &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin' &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+             exists(/databases/$(database)/documents/administrators/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/administrators/$(request.auth.uid)).data.isSuperAdmin == true &&
+             get(/databases/$(database)/documents/administrators/$(request.auth.uid)).data.isActiveAdmin == true;
     }
     
-    // Users collection (for admin authentication)
-    match /users/{userId} {
-      // Users can read their own document
-      allow read: if request.auth != null && request.auth.uid == userId;
+    // Administrators collection (for admin authentication and management)
+    match /administrators/{adminId} {
+      // Admins can read their own document
+      allow read: if request.auth != null && request.auth.uid == adminId;
       
-      // Only super admin can list all users/admins
+      // Only super admin can list all administrators
       allow list: if isSuperAdmin();
       
-      // Only super admin can create, update, or delete users
-      allow create, update, delete: if isSuperAdmin();
+      // Only super admin can create new administrators
+      allow create: if isSuperAdmin() &&
+                      request.resource.data.keys().hasAll(['name', 'email', 'isActiveAdmin', 'isSuperAdmin', 'createdAt']) &&
+                      request.resource.data.isSuperAdmin == false; // Can't create another super admin
+      
+      // Only super admin can update administrators (activate/deactivate)
+      allow update: if isSuperAdmin() &&
+                       request.resource.data.email == resource.data.email && // Email cannot be changed
+                       (!resource.data.isSuperAdmin || request.resource.data.isSuperAdmin == true); // Can't demote super admin
+      
+      // Only super admin can delete administrators (except themselves and other super admins)
+      allow delete: if isSuperAdmin() &&
+                       resource.data.isSuperAdmin == false; // Can't delete super admin
     }
     
     // Products collection
@@ -56,6 +68,19 @@ service cloud.firestore {
       
       // Only active admins can update or delete reviews
       allow update, delete: if isActiveAdmin();
+    }
+    
+    // Orders collection
+    match /orders/{orderId} {
+      // Users can read their own orders
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      
+      // Users can create orders
+      allow create: if request.auth != null;
+      
+      // Only active admins can update or read all orders
+      allow read: if isActiveAdmin();
+      allow update: if isActiveAdmin();
     }
   }
 }

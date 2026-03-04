@@ -20,7 +20,7 @@ export default function AdminUsers() {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    displayName: ''
+    name: ''
   });
 
   useEffect(() => {
@@ -51,7 +51,7 @@ export default function AdminUsers() {
       await createAdminUser(
         formData.email,
         formData.password,
-        formData.displayName,
+        formData.name,
         currentUser.uid
       );
 
@@ -82,7 +82,7 @@ export default function AdminUsers() {
     setFormData({
       email: '',
       password: '',
-      displayName: ''
+      name: ''
     });
   };
 
@@ -117,10 +117,10 @@ export default function AdminUsers() {
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <Label className="text-slate-300">Display Name</Label>
+                <Label className="text-slate-300">Name</Label>
                 <Input
-                  value={formData.displayName}
-                  onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="bg-slate-800 border-slate-700 text-white"
                   required
                 />
@@ -193,14 +193,14 @@ export default function AdminUsers() {
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    admin.role === 'super_admin' 
+                    admin.isSuperAdmin
                       ? 'bg-gradient-to-br from-purple-500 to-pink-500' 
                       : 'bg-gradient-to-br from-orange-500 to-amber-500'
                   }`}>
                     <Shield className="w-5 h-5 text-white" />
                   </div>
                   <div>
-                    <CardTitle className="text-white text-lg">{admin.displayName}</CardTitle>
+                    <CardTitle className="text-white text-lg">{admin.name}</CardTitle>
                     <p className="text-sm text-slate-400">{admin.email}</p>
                   </div>
                 </div>
@@ -212,15 +212,15 @@ export default function AdminUsers() {
                   <span className="text-slate-500 text-sm">Role:</span>
                   <Badge 
                     variant="outline" 
-                    className={admin.role === 'super_admin' ? 'border-purple-500 text-purple-400' : ''}
+                    className={admin.isSuperAdmin ? 'border-purple-500 text-purple-400' : ''}
                   >
-                    {admin.role === 'super_admin' ? 'Super Admin' : 'Admin'}
+                    {admin.isSuperAdmin ? 'Super Admin' : 'Admin'}
                   </Badge>
                 </div>
                 
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 text-sm">Status:</span>
-                  {admin.isActive ? (
+                  {admin.isActiveAdmin ? (
                     <Badge className="bg-green-500/20 text-green-400">Active</Badge>
                   ) : (
                     <Badge className="bg-red-500/20 text-red-400">Inactive</Badge>
@@ -234,14 +234,14 @@ export default function AdminUsers() {
                   </span>
                 </div>
 
-                {admin.role !== 'super_admin' && (
+                {!admin.isSuperAdmin && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleToggleStatus(admin.uid, admin.isActive)}
+                    onClick={() => handleToggleStatus(admin.uid, admin.isActiveAdmin)}
                     className="w-full mt-2 border-slate-700"
                   >
-                    {admin.isActive ? (
+                    {admin.isActiveAdmin ? (
                       <>
                         <ShieldOff className="w-4 h-4 mr-1" />
                         Deactivate
