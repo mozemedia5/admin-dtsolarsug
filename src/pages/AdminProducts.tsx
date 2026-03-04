@@ -3,7 +3,8 @@ import {
   getAllProducts, 
   createProduct, 
   updateProduct, 
-  deleteProduct
+  deleteProduct,
+  uploadProductImage
 } from '@/lib/dataService';
 import type { Product } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -59,11 +60,22 @@ export default function AdminProducts() {
     setSuccess('');
 
     try {
+      let imageUrl = formData.image;
+
+      // If image is a base64 data URL (from file upload), upload to Firebase Storage
+      if (imageUrl && imageUrl.startsWith('data:')) {
+        const blob = await (await fetch(imageUrl)).blob();
+        const file = new File([blob], `product-image-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        const tempId = editingProduct?.id || `temp-${Date.now()}`;
+        imageUrl = await uploadProductImage(file, tempId);
+      }
+
       const productData: any = {
         ...formData,
+        image: imageUrl,
         price: Number(formData.price),
         features: formData.features.split('\n').filter(f => f.trim()),
-        images: [formData.image]
+        images: [imageUrl]
       };
 
       if (editingProduct) {
@@ -301,8 +313,15 @@ export default function AdminProducts() {
                 src={product.image} 
                 alt={product.name}
                 className="w-full h-full object-cover"
+                crossOrigin="anonymous"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x225?text=No+Image';
+                  const target = e.target as HTMLImageElement;
+                  const currentSrc = target.src;
+                  if (!currentSrc.includes('weserv.nl') && product.image && product.image.startsWith('http')) {
+                    target.src = `https://images.weserv.nl/?url=${encodeURIComponent(product.image)}&output=jpg&q=80`;
+                  } else {
+                    target.style.display = 'none';
+                  }
                 }}
               />
               <div className="absolute top-2 right-2">

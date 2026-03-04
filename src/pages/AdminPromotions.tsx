@@ -3,7 +3,8 @@ import {
   getAllPromotions, 
   createPromotion, 
   updatePromotion, 
-  deletePromotion
+  deletePromotion,
+  uploadPromotionImage
 } from '@/lib/dataService';
 import type { Promotion } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -57,11 +58,23 @@ export default function AdminPromotions() {
     setSuccess('');
 
     try {
+      let imageUrl = formData.image;
+
+      // If image is a base64 data URL (from file upload), upload to Firebase Storage
+      if (imageUrl && imageUrl.startsWith('data:')) {
+        const blob = await (await fetch(imageUrl)).blob();
+        const file = new File([blob], `promo-image-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        const tempId = editingPromotion?.id || `temp-${Date.now()}`;
+        imageUrl = await uploadPromotionImage(file, tempId);
+      }
+
+      const promoData = { ...formData, image: imageUrl };
+
       if (editingPromotion) {
-        await updatePromotion(editingPromotion.id, formData);
+        await updatePromotion(editingPromotion.id, promoData);
         setSuccess('Promotion updated successfully');
       } else {
-        await createPromotion(formData);
+        await createPromotion(promoData);
         setSuccess('Promotion created successfully');
       }
 
@@ -258,8 +271,15 @@ export default function AdminPromotions() {
                 src={promotion.image} 
                 alt={promotion.title}
                 className="w-full h-full object-cover"
+                crossOrigin="anonymous"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = 'https://via.placeholder.com/800x340?text=Promotion+Banner';
+                  const target = e.target as HTMLImageElement;
+                  const currentSrc = target.src;
+                  if (!currentSrc.includes('weserv.nl') && promotion.image && promotion.image.startsWith('http')) {
+                    target.src = `https://images.weserv.nl/?url=${encodeURIComponent(promotion.image)}&output=jpg&q=80`;
+                  } else {
+                    target.style.display = 'none';
+                  }
                 }}
               />
               <div className="absolute top-2 right-2">
