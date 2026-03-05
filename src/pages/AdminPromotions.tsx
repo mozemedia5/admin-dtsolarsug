@@ -77,19 +77,21 @@ export default function AdminPromotions() {
     // base64 / data URL — upload to Firebase Storage
     if (imageValue.startsWith('data:')) {
       try {
-        const parts = imageValue.split(';');
-        const mimeType = parts[0].split(':')[1];
-        const base64Data = parts[1].split(',')[1];
-        const binaryData = atob(base64Data);
-        const arrayBuffer = new ArrayBuffer(binaryData.length);
-        const uint8Array = new Uint8Array(arrayBuffer);
+        const parts = imageValue.split(',');
+        if (parts.length < 2) throw new Error('Invalid image data');
         
-        for (let i = 0; i < binaryData.length; i++) {
-          uint8Array[i] = binaryData.charCodeAt(i);
+        const mimeMatch = imageValue.match(/data:([^;]+);/);
+        const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+        const base64Data = parts[1];
+        
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
         }
         
-        const blob = new Blob([arrayBuffer], { type: mimeType });
-        const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+        const blob = new Blob([bytes], { type: mimeType });
+        const ext = mimeType.split('/')[1] || 'jpg';
         const file = new File([blob], `promo-${promoId}-${Date.now()}.${ext}`, { type: mimeType });
         
         return await uploadPromotionImage(file, promoId);

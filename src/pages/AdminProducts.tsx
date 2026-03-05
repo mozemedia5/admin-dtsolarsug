@@ -79,20 +79,24 @@ export default function AdminProducts() {
     // base64 / data URL — upload to Firebase Storage
     if (imageValue.startsWith('data:')) {
       try {
-        // More robust way to convert data URL to Blob without fetch()
-        const parts = imageValue.split(';');
-        const mimeType = parts[0].split(':')[1];
-        const base64Data = parts[1].split(',')[1];
-        const binaryData = atob(base64Data);
-        const arrayBuffer = new ArrayBuffer(binaryData.length);
-        const uint8Array = new Uint8Array(arrayBuffer);
+        // Optimization: If the data URL is very large, it might be the cause of the hang.
+        // We'll still process it, but ensure we're using a more efficient conversion.
+        const parts = imageValue.split(',');
+        if (parts.length < 2) throw new Error('Invalid image data');
         
-        for (let i = 0; i < binaryData.length; i++) {
-          uint8Array[i] = binaryData.charCodeAt(i);
+        const mimeMatch = imageValue.match(/data:([^;]+);/);
+        const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+        const base64Data = parts[1];
+        
+        // Use a more efficient way to convert base64 to Blob
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
         }
         
-        const blob = new Blob([arrayBuffer], { type: mimeType });
-        const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+        const blob = new Blob([bytes], { type: mimeType });
+        const ext = mimeType.split('/')[1] || 'jpg';
         const file = new File([blob], `product-${productId}-${Date.now()}.${ext}`, { type: mimeType });
         
         return await uploadProductImage(file, productId);

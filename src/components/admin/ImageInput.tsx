@@ -250,10 +250,41 @@ export function ImageInput({ value, onChange, label = "Image" }: ImageInputProps
     const reader = new FileReader();
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
-      setPreviewUrl(dataUrl);
-      setImageError(false);
-      setImageValid(true);
-      onChange(dataUrl);
+      
+      // Compress image on initial selection if it's too large
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        
+        // Max dimensions for products/promos
+        const MAX_WIDTH = 1200;
+        const MAX_HEIGHT = 1200;
+        
+        if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+          if (width > height) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          } else {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        // Compress to JPEG 0.7 for efficient storage and upload
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        setPreviewUrl(compressedDataUrl);
+        setImageError(false);
+        setImageValid(true);
+        onChange(compressedDataUrl);
+      };
+      img.src = dataUrl;
     };
     reader.readAsDataURL(file);
     // Reset input so same file can be re-selected
@@ -284,7 +315,8 @@ export function ImageInput({ value, onChange, label = "Image" }: ImageInputProps
       finalCanvas = cropCanvas;
     }
 
-    const dataUrl = finalCanvas.toDataURL('image/png', 0.92);
+    // Use jpeg for better compression on final output
+    const dataUrl = finalCanvas.toDataURL('image/jpeg', 0.8);
     setPreviewUrl(dataUrl);
     setEditorDataUrl(dataUrl);
     onChange(dataUrl);
@@ -292,7 +324,6 @@ export function ImageInput({ value, onChange, label = "Image" }: ImageInputProps
     setEditorOpen(false);
     setCropMode(false);
     setRemoveBgMode(false);
-    setZoom(100);
     setRotation(0);
     setFlipH(false);
     setFlipV(false);
