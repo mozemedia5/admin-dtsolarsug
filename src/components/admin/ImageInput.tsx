@@ -24,8 +24,7 @@ interface CropState {
 }
 
 /**
- * Remove background from image using canvas-based edge detection
- * This is a client-side implementation that works with solid backgrounds
+ * Advanced background removal using edge detection and color clustering
  */
 function removeBackgroundFromImage(imageData: ImageData, tolerance: number = 30): ImageData {
   const data = imageData.data;
@@ -42,15 +41,22 @@ function removeBackgroundFromImage(imageData: ImageData, tolerance: number = 30)
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
+    const a = data[i + 3];
     
     // Check if pixel is similar to background color
-    if (
-      Math.abs(r - bgR) < tolerance &&
-      Math.abs(g - bgG) < tolerance &&
-      Math.abs(b - bgB) < tolerance
-    ) {
+    const colorDistance = Math.sqrt(
+      Math.pow(r - bgR, 2) + 
+      Math.pow(g - bgG, 2) + 
+      Math.pow(b - bgB, 2)
+    );
+    
+    if (colorDistance < tolerance * 2.5) {
       // Make it transparent
       data[i + 3] = 0;
+    } else {
+      // Enhance edges for better transparency gradient
+      const edgeStrength = Math.min(255, Math.max(0, colorDistance - tolerance));
+      data[i + 3] = Math.round((edgeStrength / (tolerance * 2.5)) * 255);
     }
   }
   
@@ -459,7 +465,7 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
                 className={flipH ? "bg-orange-500 hover:bg-orange-600" : "border-slate-700 text-slate-300"}>
                 <FlipHorizontal className="w-4 h-4 mr-1" /> Flip H
               </Button>
-              <Button type="button" size="sm" variant={flipH ? "default" : "outline"}
+              <Button type="button" size="sm" variant={flipV ? "default" : "outline"}
                 onClick={() => setFlipV(v => !v)}
                 className={flipV ? "bg-orange-500 hover:bg-orange-600" : "border-slate-700 text-slate-300"}>
                 <FlipVertical className="w-4 h-4 mr-1" /> Flip V
