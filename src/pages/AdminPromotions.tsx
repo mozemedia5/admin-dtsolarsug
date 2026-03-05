@@ -77,6 +77,7 @@ export default function AdminPromotions() {
     // base64 / data URL — upload to Firebase Storage
     if (imageValue.startsWith('data:')) {
       try {
+        console.log('Processing data URL for upload...');
         const parts = imageValue.split(',');
         if (parts.length < 2) throw new Error('Invalid image data');
         
@@ -94,10 +95,17 @@ export default function AdminPromotions() {
         const ext = mimeType.split('/')[1] || 'jpg';
         const file = new File([blob], `promo-${promoId}-${Date.now()}.${ext}`, { type: mimeType });
         
-        return await uploadPromotionImage(file, promoId);
-      } catch (err) {
-        console.error('Error processing data URL:', err);
-        throw new Error('Failed to process image data. The image might be too large or corrupted.');
+        console.log('Starting uploadPromotionImage...');
+        // Add a timeout to the upload process to prevent infinite hanging
+        const uploadPromise = uploadPromotionImage(file, promoId);
+        const timeoutPromise = new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Promotion image upload timed out after 30 seconds')), 30000)
+        );
+        
+        return await Promise.race([uploadPromise, timeoutPromise]);
+      } catch (err: any) {
+        console.error('Error processing/uploading promotion image:', err);
+        throw new Error(`Image Error: ${err.message || 'Failed to process image'}`);
       }
     }
     return imageValue;
@@ -115,8 +123,12 @@ export default function AdminPromotions() {
 
     setSubmitting(true);
     try {
+      console.log('Starting promotion save process...');
       const storageId = editingPromotion?.id || `new-${Date.now()}`;
+      
+      console.log('Resolving image URL...');
       const imageUrl = await resolveImageUrl(formData.image, storageId);
+      console.log('Image URL resolved:', imageUrl);
 
       const promoData: Omit<Promotion, 'id'> = {
         title: formData.title.trim(),
@@ -128,25 +140,31 @@ export default function AdminPromotions() {
       };
 
       if (editingPromotion) {
+        console.log('Updating existing promotion:', editingPromotion.id);
         await updatePromotion(editingPromotion.id, promoData);
+        console.log('Update successful');
         // Optimistic update — immediately reflect in UI
         setPromotions(prev =>
           prev.map(p => p.id === editingPromotion.id ? { ...p, ...promoData, id: editingPromotion.id } : p)
         );
         setSuccess('✅ Promotion updated successfully!');
       } else {
+        console.log('Creating new promotion...');
         const newId = await createPromotion(promoData);
+        console.log('Creation successful, new ID:', newId);
         // Append to local state immediately — no full reload
         setPromotions(prev => [...prev, { ...promoData, id: newId }]);
         setSuccess('✅ Promotion created successfully!');
       }
 
+      console.log('Closing dialog and resetting form...');
       setDialogOpen(false);
       resetForm();
     } catch (err: any) {
-      console.error('Promotion save error:', err);
-      setError(err.message || 'Operation failed. Please try again.');
+      console.error('CRITICAL: Promotion save error:', err);
+      setError(`Error: ${err.message || 'Operation failed'}. Check console for details.`);
     } finally {
+      console.log('Save process finished, setting submitting to false');
       setSubmitting(false);
     }
   };

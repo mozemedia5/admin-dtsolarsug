@@ -79,8 +79,7 @@ export default function AdminProducts() {
     // base64 / data URL — upload to Firebase Storage
     if (imageValue.startsWith('data:')) {
       try {
-        // Optimization: If the data URL is very large, it might be the cause of the hang.
-        // We'll still process it, but ensure we're using a more efficient conversion.
+        console.log('Processing data URL for upload...');
         const parts = imageValue.split(',');
         if (parts.length < 2) throw new Error('Invalid image data');
         
@@ -88,7 +87,6 @@ export default function AdminProducts() {
         const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
         const base64Data = parts[1];
         
-        // Use a more efficient way to convert base64 to Blob
         const binaryString = atob(base64Data);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
@@ -99,10 +97,17 @@ export default function AdminProducts() {
         const ext = mimeType.split('/')[1] || 'jpg';
         const file = new File([blob], `product-${productId}-${Date.now()}.${ext}`, { type: mimeType });
         
-        return await uploadProductImage(file, productId);
-      } catch (err) {
-        console.error('Error processing data URL:', err);
-        throw new Error('Failed to process image data. The image might be too large or corrupted.');
+        console.log('Starting uploadProductImage...');
+        // Add a timeout to the upload process to prevent infinite hanging
+        const uploadPromise = uploadProductImage(file, productId);
+        const timeoutPromise = new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Image upload timed out after 30 seconds')), 30000)
+        );
+        
+        return await Promise.race([uploadPromise, timeoutPromise]);
+      } catch (err: any) {
+        console.error('Error processing/uploading image:', err);
+        throw new Error(`Image Error: ${err.message || 'Failed to process image'}`);
       }
     }
     return imageValue;
@@ -124,9 +129,13 @@ export default function AdminProducts() {
 
     setSubmitting(true);
     try {
+      console.log('Starting product save process...');
       // For existing products keep the same id; for new ones create a temp placeholder
       const storageId = editingProduct?.id || `new-${Date.now()}`;
+      
+      console.log('Resolving image URL...');
       const imageUrl = await resolveImageUrl(formData.image, storageId);
+      console.log('Image URL resolved:', imageUrl);
 
       const productData: Omit<Product, 'id'> & { rating?: number; reviews?: number } = {
         name: formData.name.trim(),
@@ -145,25 +154,31 @@ export default function AdminProducts() {
       };
 
       if (editingProduct) {
+        console.log('Updating existing product:', editingProduct.id);
         await updateProduct(editingProduct.id, productData);
+        console.log('Update successful');
         // Optimistic update — update local state immediately
         setProducts(prev =>
           prev.map(p => p.id === editingProduct.id ? { ...p, ...productData, id: editingProduct.id } : p)
         );
         setSuccess('✅ Product updated successfully!');
       } else {
+        console.log('Creating new product...');
         const newId = await createProduct(productData);
+        console.log('Creation successful, new ID:', newId);
         // Append new product to local state immediately (no full reload)
         setProducts(prev => [...prev, { ...productData, id: newId }]);
         setSuccess('✅ Product created successfully!');
       }
 
+      console.log('Closing dialog and resetting form...');
       setDialogOpen(false);
       resetForm();
     } catch (err: any) {
-      console.error('Product save error:', err);
-      setError(err.message || 'Operation failed. Please try again.');
+      console.error('CRITICAL: Product save error:', err);
+      setError(`Error: ${err.message || 'Operation failed'}. Check console for details.`);
     } finally {
+      console.log('Save process finished, setting submitting to false');
       setSubmitting(false);
     }
   };

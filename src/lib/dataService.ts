@@ -46,18 +46,24 @@ export const getProductById = async (id: string): Promise<Product | null> => {
 };
 
 export const createProduct = async (product: Omit<Product, 'id'>): Promise<string> => {
+  console.log('Attempting to create product:', product.name);
   try {
     const docRef = await addDoc(collection(db, 'products'), product);
+    console.log('Product created successfully with ID:', docRef.id);
     return docRef.id;
   } catch (error: any) {
+    console.error('Firestore createProduct error:', error);
     throw new Error(error.message || 'Failed to create product');
   }
 };
 
 export const updateProduct = async (id: string, product: Partial<Product>): Promise<void> => {
+  console.log('Attempting to update product:', id);
   try {
     await updateDoc(doc(db, 'products', id), product);
+    console.log('Product updated successfully:', id);
   } catch (error: any) {
+    console.error('Firestore updateProduct error:', error);
     throw new Error(error.message || 'Failed to update product');
   }
 };
@@ -75,14 +81,19 @@ export const deleteProduct = async (id: string): Promise<void> => {
  * Uses timestamp + original filename for uniqueness
  */
 export const uploadProductImage = async (file: File, productId: string): Promise<string> => {
+  console.log('Attempting to upload product image for:', productId);
   try {
     const timestamp = Date.now();
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const storageRef = ref(storage, `products/${productId}/${timestamp}_${safeName}`);
-    await uploadBytes(storageRef, file);
+    console.log('Storage ref created:', storageRef.fullPath);
+    const uploadResult = await uploadBytes(storageRef, file);
+    console.log('Upload bytes completed:', uploadResult.metadata.fullPath);
     const downloadURL = await getDownloadURL(storageRef);
+    console.log('Download URL obtained:', downloadURL);
     return downloadURL;
   } catch (error: any) {
+    console.error('Firebase Storage uploadProductImage error:', error);
     throw new Error(error.message || 'Failed to upload product image');
   }
 };
@@ -120,18 +131,24 @@ export const getPromotionById = async (id: string): Promise<Promotion | null> =>
 };
 
 export const createPromotion = async (promotion: Omit<Promotion, 'id'>): Promise<string> => {
+  console.log('Attempting to create promotion:', promotion.title);
   try {
     const docRef = await addDoc(collection(db, 'promotions'), promotion);
+    console.log('Promotion created successfully with ID:', docRef.id);
     return docRef.id;
   } catch (error: any) {
+    console.error('Firestore createPromotion error:', error);
     throw new Error(error.message || 'Failed to create promotion');
   }
 };
 
 export const updatePromotion = async (id: string, promotion: Partial<Promotion>): Promise<void> => {
+  console.log('Attempting to update promotion:', id);
   try {
     await updateDoc(doc(db, 'promotions', id), promotion);
+    console.log('Promotion updated successfully:', id);
   } catch (error: any) {
+    console.error('Firestore updatePromotion error:', error);
     throw new Error(error.message || 'Failed to update promotion');
   }
 };
@@ -149,14 +166,19 @@ export const deletePromotion = async (id: string): Promise<void> => {
  * Uses timestamp + original filename for uniqueness
  */
 export const uploadPromotionImage = async (file: File, promotionId: string): Promise<string> => {
+  console.log('Attempting to upload promotion image for:', promotionId);
   try {
     const timestamp = Date.now();
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const storageRef = ref(storage, `promotions/${promotionId}/${timestamp}_${safeName}`);
-    await uploadBytes(storageRef, file);
+    console.log('Storage ref created:', storageRef.fullPath);
+    const uploadResult = await uploadBytes(storageRef, file);
+    console.log('Upload bytes completed:', uploadResult.metadata.fullPath);
     const downloadURL = await getDownloadURL(storageRef);
+    console.log('Download URL obtained:', downloadURL);
     return downloadURL;
   } catch (error: any) {
+    console.error('Firebase Storage uploadPromotionImage error:', error);
     throw new Error(error.message || 'Failed to upload promotion image');
   }
 };
