@@ -20,9 +20,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import { useProducts, categoryLabels } from '@/hooks/useFirebaseData';
+import { products, categoryLabels } from '@/data';
 import type { Product } from '@/types';
-import { ProductImage } from '@/components/shared/ProductImage';
 
 interface ProductsProps {
   onPageChange: (page: string) => void;
@@ -49,24 +48,20 @@ async function shareProduct(product: Product): Promise<'shared' | 'copied' | 'er
     url,
   };
 
-  // Use native Web Share API if available (mobile Safari, Chrome for Android, etc.)
   if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
     try {
       await navigator.share(shareData);
       return 'shared';
-    } catch (err: any) {
-      // User cancelled share — not an error
-      if (err?.name === 'AbortError') return 'shared';
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return 'shared';
       return 'error';
     }
   }
 
-  // Fallback: copy link to clipboard
   try {
     await navigator.clipboard.writeText(url);
     return 'copied';
   } catch {
-    // Last resort: execCommand
     const ta = document.createElement('textarea');
     ta.value = url;
     ta.style.position = 'fixed';
@@ -87,9 +82,6 @@ export function Products({ onPageChange }: ProductsProps) {
   const [likedProducts, setLikedProducts] = useState<Set<string>>(new Set());
   const [sharedProductId, setSharedProductId] = useState<string | null>(null);
   const [shareFeedback, setShareFeedback] = useState<string>('');
-  
-  // Fetch products from Firebase
-  const { products, loading, error } = useProducts();
 
   const filteredProducts = products.filter(product => {
     const matchesCategory = selectedCategory === 'all' || product.category === selectedCategory;
@@ -142,24 +134,6 @@ export function Products({ onPageChange }: ProductsProps) {
       </div>
 
       <div className="container mx-auto px-4">
-        {/* Error State */}
-        {error && (
-          <div className="bg-red-900/20 border border-red-900/50 text-red-400 p-4 rounded-lg mb-6">
-            {error}. Please try again later.
-          </div>
-        )}
-
-        {/* Loading State */}
-        {loading && (
-          <div className="text-center text-slate-400 py-12">
-            <div className="inline-block w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-            <p>Loading products...</p>
-          </div>
-        )}
-
-        {/* Content - only show when not loading */}
-        {!loading && (
-          <>
         {/* Search and Filter Bar */}
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
           <div className="relative flex-1">
@@ -240,7 +214,7 @@ export function Products({ onPageChange }: ProductsProps) {
 
         {/* Clipboard feedback toast */}
         {shareFeedback && (
-          <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-slate-800 border border-slate-600 text-white px-4 py-2 rounded-full text-sm flex items-center gap-2 shadow-xl animate-fade-in">
+          <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-slate-800 border border-slate-600 text-white px-4 py-2 rounded-full text-sm flex items-center gap-2 shadow-xl">
             <Check className="w-4 h-4 text-green-400" />
             {shareFeedback}
           </div>
@@ -256,19 +230,12 @@ export function Products({ onPageChange }: ProductsProps) {
               >
                 {/* Product Image */}
                 <div 
-                  className="relative aspect-square bg-slate-700 overflow-hidden cursor-pointer"
+                  className="relative aspect-square bg-slate-700 flex items-center justify-center cursor-pointer"
                   onClick={() => setSelectedProduct(product)}
                 >
-                  <ProductImage
-                    src={product.image}
-                    alt={product.name}
-                    className="w-full h-full group-hover:scale-105 transition-transform duration-300"
-                    fallbackIcon={
-                      <div className="w-24 h-24 bg-gradient-to-br from-slate-600 to-slate-700 rounded-2xl flex items-center justify-center">
-                        <ProductIcon category={product.category} />
-                      </div>
-                    }
-                  />
+                  <div className="w-24 h-24 bg-gradient-to-br from-slate-600 to-slate-700 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <ProductIcon category={product.category} />
+                  </div>
                   
                   {/* Badges */}
                   <div className="absolute top-2 left-2 flex flex-col gap-1">
@@ -341,15 +308,15 @@ export function Products({ onPageChange }: ProductsProps) {
                   </div>
 
                   <div className="flex items-center justify-between mt-2">
-                    <p className="text-orange-400 font-semibold text-xs sm:text-sm">{formatPrice(product.price)}</p>
+                    <p className="text-orange-400 font-semibold">{formatPrice(product.price)}</p>
                     <Button 
                       size="sm"
                       disabled={!product.inStock}
                       onClick={() => onPageChange('preorder')}
-                      className="h-8 px-2 sm:px-3 bg-orange-500 hover:bg-orange-600 text-white text-xs"
+                      className="h-8 px-3 bg-orange-500 hover:bg-orange-600 text-white text-xs"
                     >
-                      <ShoppingCart className="w-3 h-3 sm:mr-1" />
-                      <span className="hidden sm:inline">Order</span>
+                      <ShoppingCart className="w-3 h-3 mr-1" />
+                      Order
                     </Button>
                   </div>
                 </CardContent>
@@ -365,8 +332,6 @@ export function Products({ onPageChange }: ProductsProps) {
             <p className="text-slate-400 text-sm">Try adjusting your search or filter</p>
           </div>
         )}
-        </>
-        )}
       </div>
 
       {/* Product Detail Dialog */}
@@ -380,17 +345,10 @@ export function Products({ onPageChange }: ProductsProps) {
               
               <div className="grid md:grid-cols-2 gap-6">
                 {/* Product Image */}
-                <div className="aspect-square bg-slate-800 rounded-xl overflow-hidden">
-                  <ProductImage
-                    src={selectedProduct.image}
-                    alt={selectedProduct.name}
-                    className="w-full h-full"
-                    fallbackIcon={
-                      <div className="w-32 h-32 bg-gradient-to-br from-slate-700 to-slate-600 rounded-2xl flex items-center justify-center">
-                        <ProductIcon category={selectedProduct.category} className="w-16 h-16" />
-                      </div>
-                    }
-                  />
+                <div className="aspect-square bg-slate-800 rounded-xl flex items-center justify-center">
+                  <div className="w-32 h-32 bg-gradient-to-br from-slate-700 to-slate-600 rounded-2xl flex items-center justify-center">
+                    <ProductIcon category={selectedProduct.category} className="w-16 h-16" />
+                  </div>
                 </div>
 
                 {/* Product Details */}
@@ -455,7 +413,7 @@ export function Products({ onPageChange }: ProductsProps) {
                     <Button
                       variant="outline"
                       onClick={() => handleShare(selectedProduct)}
-                      className="border-slate-700 text-slate-400 hover:text-orange-400 hover:border-orange-500/50 relative"
+                      className="border-slate-700 text-slate-400 hover:text-orange-400 hover:border-orange-500/50"
                       title="Share this product"
                     >
                       {sharedProductId === selectedProduct.id ? (
