@@ -75,12 +75,31 @@ export default function AdminProducts() {
     if (!imageValue) return '';
     // Already an uploaded URL — return as-is (fast path, no upload needed)
     if (imageValue.startsWith('http')) return imageValue;
+    
     // base64 / data URL — upload to Firebase Storage
     if (imageValue.startsWith('data:')) {
-      const blob = await (await fetch(imageValue)).blob();
-      const ext = blob.type === 'image/png' ? 'png' : 'jpg';
-      const file = new File([blob], `product-${productId}-${Date.now()}.${ext}`, { type: blob.type });
-      return await uploadProductImage(file, productId);
+      try {
+        // More robust way to convert data URL to Blob without fetch()
+        const parts = imageValue.split(';');
+        const mimeType = parts[0].split(':')[1];
+        const base64Data = parts[1].split(',')[1];
+        const binaryData = atob(base64Data);
+        const arrayBuffer = new ArrayBuffer(binaryData.length);
+        const uint8Array = new Uint8Array(arrayBuffer);
+        
+        for (let i = 0; i < binaryData.length; i++) {
+          uint8Array[i] = binaryData.charCodeAt(i);
+        }
+        
+        const blob = new Blob([arrayBuffer], { type: mimeType });
+        const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+        const file = new File([blob], `product-${productId}-${Date.now()}.${ext}`, { type: mimeType });
+        
+        return await uploadProductImage(file, productId);
+      } catch (err) {
+        console.error('Error processing data URL:', err);
+        throw new Error('Failed to process image data. The image might be too large or corrupted.');
+      }
     }
     return imageValue;
   };

@@ -14,6 +14,7 @@ export interface AdminUser {
   name: string;
   isSuperAdmin: boolean;
   isActiveAdmin: boolean;
+  branch?: string;
   createdAt: any;
   createdBy?: string;
 }
@@ -112,6 +113,7 @@ export const createAdminUser = async (
   email: string,
   password: string,
   name: string,
+  branch: string,
   createdByUid: string
 ): Promise<void> => {
   // Check if creator is super admin
@@ -151,6 +153,7 @@ export const createAdminUser = async (
       name: name,
       isSuperAdmin: false,
       isActiveAdmin: true,
+      branch: branch,
       createdAt: Timestamp.now(),
       createdBy: createdByUid
     };

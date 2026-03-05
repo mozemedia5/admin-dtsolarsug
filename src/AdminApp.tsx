@@ -6,6 +6,7 @@ import AdminProducts from '@/pages/AdminProducts';
 import AdminPromotions from '@/pages/AdminPromotions';
 import AdminReviews from '@/pages/AdminReviews';
 import AdminUsers from '@/pages/AdminUsers';
+import AdminPreOrders from '@/pages/AdminPreOrders';
 import AdminDashboardLayout from '@/components/admin/AdminDashboardLayout';
 import { Loader2 } from 'lucide-react';
 
@@ -42,6 +43,8 @@ function AdminApp() {
         return <AdminPromotions />;
       case 'reviews':
         return <AdminReviews />;
+      case 'pre-orders':
+        return <AdminPreOrders />;
       case 'admins':
         return <AdminUsers />;
       default:

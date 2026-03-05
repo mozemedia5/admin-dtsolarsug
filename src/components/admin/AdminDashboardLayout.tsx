@@ -10,7 +10,8 @@ import {
   LogOut,
   Menu,
   X,
-  AlertTriangle
+  AlertTriangle,
+  ShoppingCart
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -67,6 +68,7 @@ export default function AdminDashboardLayout({
     { name: 'Products', icon: Package, page: 'products' },
     { name: 'Promotions', icon: Tag, page: 'promotions' },
     { name: 'Reviews', icon: MessageSquare, page: 'reviews' },
+    { name: 'Pre-Orders', icon: ShoppingCart, page: 'pre-orders' },
   ];
 
   // Only show admin management for super admin

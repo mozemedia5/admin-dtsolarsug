@@ -7,8 +7,10 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Shield, ShieldOff, Users, Loader2 } from 'lucide-react';
+import { Plus, Shield, ShieldOff, Users, Loader2, MapPin } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { branches } from '@/data/branches';
 
 export default function AdminUsers() {
   const [admins, setAdmins] = useState<AdminUser[]>([]);
@@ -20,7 +22,8 @@ export default function AdminUsers() {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    name: ''
+    name: '',
+    branch: 'nansana'
   });
 
   useEffect(() => {
@@ -52,6 +55,7 @@ export default function AdminUsers() {
         formData.email,
         formData.password,
         formData.name,
+        formData.branch,
         currentUser.uid
       );
 
@@ -82,7 +86,8 @@ export default function AdminUsers() {
     setFormData({
       email: '',
       password: '',
-      name: ''
+      name: '',
+      branch: 'nansana'
     });
   };
 
@@ -137,18 +142,37 @@ export default function AdminUsers() {
                 />
               </div>
 
-              <div>
-                <Label className="text-slate-300">Password</Label>
-                <Input
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="bg-slate-800 border-slate-700 text-white"
-                  required
-                  minLength={6}
-                />
-                <p className="text-xs text-slate-500 mt-1">Minimum 6 characters</p>
-              </div>
+                <div>
+                  <Label className="text-slate-300">Password</Label>
+                  <Input
+                    type="password"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    className="bg-slate-800 border-slate-700 text-white"
+                    required
+                    minLength={6}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Minimum 6 characters</p>
+                </div>
+
+                <div>
+                  <Label className="text-slate-300">Assigned Branch</Label>
+                  <Select
+                    value={formData.branch}
+                    onValueChange={(value) => setFormData({ ...formData, branch: value })}
+                  >
+                    <SelectTrigger className="bg-slate-800 border-slate-700 text-white mt-1">
+                      <SelectValue placeholder="Select branch" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-slate-800 border-slate-700">
+                      {branches.map(branch => (
+                        <SelectItem key={branch.id} value={branch.id} className="text-white">
+                          {branch.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
               <div className="flex gap-2 justify-end">
                 <Button 
@@ -218,6 +242,14 @@ export default function AdminUsers() {
                   </Badge>
                 </div>
                 
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-sm">Branch:</span>
+                  <div className="flex items-center gap-1 text-slate-300 text-sm">
+                    <MapPin className="w-3 h-3 text-orange-500" />
+                    {branches.find(b => b.id === admin.branch)?.name || 'Not assigned'}
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 text-sm">Status:</span>
                   {admin.isActiveAdmin ? (
