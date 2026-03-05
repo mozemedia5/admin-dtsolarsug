@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
-import { Upload, Link as LinkIcon, AlertCircle, CheckCircle2, Crop, RotateCw, ZoomIn, ZoomOut, FlipHorizontal, FlipVertical, RefreshCw } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle2, Crop, RotateCw, ZoomIn, ZoomOut, FlipHorizontal, FlipVertical, RefreshCw, Wand2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
@@ -16,63 +16,6 @@ interface ImageInputProps {
   required?: boolean;
 }
 
-// CORS-friendly image proxy list - tries multiple proxies
-const IMAGE_PROXIES = [
-  (url: string) => `https://images.weserv.nl/?url=${encodeURIComponent(url)}&output=jpg&q=85`,
-  (url: string) => `https://wsrv.nl/?url=${encodeURIComponent(url)}`,
-  (url: string) => `https://cors-anywhere.herokuapp.com/${url}`,
-];
-
-/**
- * Try to load an image directly, then via proxies if it fails (CORS issue).
- * Returns the working URL or null.
- */
-function tryLoadImage(url: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!url || !url.startsWith('http')) {
-      // local / data URL – use as-is
-      const img = new Image();
-      img.onload = () => resolve(url);
-      img.onerror = () => reject(new Error('Failed to load image'));
-      img.src = url;
-      return;
-    }
-
-    // Try direct load first
-    const tryProxy = (proxies: Array<(u: string) => string>, index: number) => {
-      if (index >= proxies.length) {
-        // All proxies failed, but we still accept the URL (might work in browser directly)
-        resolve(url);
-        return;
-      }
-      const proxyUrl = proxies[index](url);
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => resolve(proxyUrl);
-      img.onerror = () => tryProxy(proxies, index + 1);
-      img.src = proxyUrl;
-    };
-
-    const direct = new Image();
-    direct.crossOrigin = 'anonymous';
-    direct.onload = () => resolve(url);
-    direct.onerror = () => {
-      // Direct failed – try weserv proxy
-      tryProxy(IMAGE_PROXIES, 0);
-    };
-    // Short timeout to avoid hanging on slow URLs
-    const timer = setTimeout(() => {
-      direct.src = '';
-      tryProxy(IMAGE_PROXIES, 0);
-    }, 5000);
-    direct.onload = () => {
-      clearTimeout(timer);
-      resolve(url);
-    };
-    direct.src = url;
-  });
-}
-
 interface CropState {
   x: number;
   y: number;
@@ -80,10 +23,42 @@ interface CropState {
   height: number;
 }
 
+/**
+ * Remove background from image using canvas-based edge detection
+ * This is a client-side implementation that works with solid backgrounds
+ */
+function removeBackgroundFromImage(imageData: ImageData, tolerance: number = 30): ImageData {
+  const data = imageData.data;
+  const width = imageData.width;
+  const height = imageData.height;
+  
+  // Get the background color (from corner pixel)
+  const bgR = data[0];
+  const bgG = data[1];
+  const bgB = data[2];
+  
+  // Process each pixel
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    
+    // Check if pixel is similar to background color
+    if (
+      Math.abs(r - bgR) < tolerance &&
+      Math.abs(g - bgG) < tolerance &&
+      Math.abs(b - bgB) < tolerance
+    ) {
+      // Make it transparent
+      data[i + 3] = 0;
+    }
+  }
+  
+  return imageData;
+}
+
 export function ImageInput({ value, onChange, label = "Image", placeholder, required }: ImageInputProps) {
-  const [imageUrl, setImageUrl] = useState(value);
   const [imageError, setImageError] = useState(false);
-  const [imageLoading, setImageLoading] = useState(false);
   const [imageValid, setImageValid] = useState(!!value);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>(value);
@@ -96,13 +71,14 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
   const [flipH, setFlipH] = useState(false);
   const [flipV, setFlipV] = useState(false);
   const [cropMode, setCropMode] = useState(false);
+  const [removeBgMode, setRemoveBgMode] = useState(false);
+  const [bgRemovalTolerance, setBgRemovalTolerance] = useState(30);
   const [crop, setCrop] = useState<CropState>({ x: 10, y: 10, width: 80, height: 80 });
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [resizeHandle, setResizeHandle] = useState('');
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const editorCanvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -111,7 +87,7 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
     if (!editorOpen || !resolvedUrl) return;
     renderEditorCanvas();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editorOpen, zoom, rotation, flipH, flipV, resolvedUrl]);
+  }, [editorOpen, zoom, rotation, flipH, flipV, resolvedUrl, removeBgMode, bgRemovalTolerance]);
 
   const renderEditorCanvas = useCallback(() => {
     const canvas = editorCanvasRef.current;
@@ -143,6 +119,13 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
       );
       ctx.drawImage(img, -w / 2, -h / 2, w, h);
       ctx.restore();
+
+      // Apply background removal if enabled
+      if (removeBgMode) {
+        const imageData = ctx.getImageData(0, 0, w, h);
+        const processedData = removeBackgroundFromImage(imageData, bgRemovalTolerance);
+        ctx.putImageData(processedData, 0, 0);
+      }
     };
     img.onerror = () => {
       // fallback – draw placeholder
@@ -160,47 +143,7 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
       cx.fillText('Image preview unavailable', 240, 180);
     };
     img.src = resolvedUrl;
-  }, [resolvedUrl, zoom, rotation, flipH, flipV]);
-
-  // Validate image URL – tries direct then proxy
-  const validateImageUrl = useCallback(async (url: string) => {
-    if (!url) {
-      setImageError(false);
-      setImageValid(false);
-      setImageLoading(false);
-      return;
-    }
-
-    setImageLoading(true);
-    setImageError(false);
-    setImageValid(false);
-
-    try {
-      const working = await tryLoadImage(url);
-      setResolvedUrl(working);
-      setPreviewUrl(working);
-      setImageValid(true);
-      setImageError(false);
-      onChange(url); // always store the original URL in Firebase
-    } catch {
-      // Even if proxy failed, accept the URL anyway – user said it's valid
-      setResolvedUrl(url);
-      setPreviewUrl(url);
-      setImageValid(true);
-      setImageError(false);
-      onChange(url);
-    } finally {
-      setImageLoading(false);
-    }
-  }, [onChange]);
-
-  // Handle URL input
-  const handleUrlChange = (url: string) => {
-    setImageUrl(url);
-    if (url.startsWith('http') || url.startsWith('/')) {
-      validateImageUrl(url);
-    }
-  };
+  }, [resolvedUrl, zoom, rotation, flipH, flipV, removeBgMode, bgRemovalTolerance]);
 
   // Handle file upload
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -221,15 +164,6 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
       onChange(dataUrl);
     };
     reader.readAsDataURL(file);
-  };
-
-  // Handle paste
-  const handlePaste = (e: React.ClipboardEvent) => {
-    const text = e.clipboardData.getData('text');
-    if (text.startsWith('http')) {
-      setImageUrl(text);
-      validateImageUrl(text);
-    }
   };
 
   // ---- Editor actions ----
@@ -257,13 +191,14 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
       finalCanvas = cropCanvas;
     }
 
-    const dataUrl = finalCanvas.toDataURL('image/jpeg', 0.92);
+    const dataUrl = finalCanvas.toDataURL('image/png', 0.92);
     setPreviewUrl(dataUrl);
     setResolvedUrl(dataUrl);
     onChange(dataUrl);
     setImageValid(true);
     setEditorOpen(false);
     setCropMode(false);
+    setRemoveBgMode(false);
     // reset
     setZoom(100);
     setRotation(0);
@@ -277,6 +212,8 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
     setFlipH(false);
     setFlipV(false);
     setCropMode(false);
+    setRemoveBgMode(false);
+    setBgRemovalTolerance(30);
     setCrop({ x: 10, y: 10, width: 80, height: 80 });
   };
 
@@ -306,8 +243,16 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
       } else {
         if (resizeHandle.includes('e')) width = Math.max(10, Math.min(100 - x, width + dx));
         if (resizeHandle.includes('s')) height = Math.max(10, Math.min(100 - y, height + dy));
-        if (resizeHandle.includes('w')) { width = Math.max(10, width - dx); x = Math.max(0, x + dx); }
-        if (resizeHandle.includes('n')) { height = Math.max(10, height - dy); y = Math.max(0, y + dy); }
+        if (resizeHandle.includes('w')) {
+          const newWidth = Math.max(10, width - dx);
+          x = Math.max(0, x + (width - newWidth));
+          width = newWidth;
+        }
+        if (resizeHandle.includes('n')) {
+          const newHeight = Math.max(10, height - dy);
+          y = Math.max(0, y + (height - newHeight));
+          height = newHeight;
+        }
       }
       return { x, y, width, height };
     });
@@ -320,212 +265,121 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <Label className="text-slate-300">{label}</Label>
+      
+      {imageError && (
+        <Alert variant="destructive" className="bg-red-950/50 border-red-900">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>Invalid image file</AlertDescription>
+        </Alert>
+      )}
 
-      <Tabs defaultValue="url" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 bg-slate-800">
-          <TabsTrigger value="url" className="data-[state=active]:bg-slate-700">
-            <LinkIcon className="w-4 h-4 mr-2" />
-            Image URL
-          </TabsTrigger>
-          <TabsTrigger value="upload" className="data-[state=active]:bg-slate-700">
-            <Upload className="w-4 h-4 mr-2" />
-            Upload File
-          </TabsTrigger>
-        </TabsList>
+      <div className="relative">
+        <div className="border-2 border-dashed border-slate-700 rounded-lg p-6 text-center bg-slate-800/50 hover:bg-slate-800 transition-colors">
+          <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+          <p className="text-sm text-slate-400 mb-2">Click to upload image</p>
+          <p className="text-xs text-slate-500">PNG, JPG, GIF up to 10MB</p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleFileChange}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          />
+        </div>
+      </div>
 
-        {/* URL Tab */}
-        <TabsContent value="url" className="space-y-3">
-          <div className="space-y-2">
-            <Input
-              value={imageUrl}
-              onChange={(e) => handleUrlChange(e.target.value)}
-              onPaste={handlePaste}
-              className="bg-slate-800 border-slate-700 text-white"
-              placeholder={placeholder || "Paste any image URL from Ideogram, Pinterest, etc."}
-              required={required}
-            />
-            <p className="text-xs text-slate-400">
-              Supports: Ideogram, Pinterest, Facebook, Instagram, Imgur, Google Images, or any image URL.
-              URLs that can't load directly will be proxied automatically.
-            </p>
-          </div>
-
-          {imageLoading && (
-            <Alert className="bg-slate-800 border-slate-700">
-              <AlertCircle className="h-4 w-4 text-blue-500" />
-              <AlertDescription className="text-slate-300">
-                Loading image... trying direct and proxy methods.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {imageError && imageUrl && (
-            <Alert className="bg-slate-800 border-red-500">
-              <AlertCircle className="h-4 w-4 text-red-500" />
-              <AlertDescription className="text-red-300">
-                Could not preview this URL (CORS restriction). The URL has been saved as-is — it will display correctly on the website.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {imageValid && !imageLoading && (
-            <Alert className="bg-slate-800 border-green-500">
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
-              <AlertDescription className="text-green-300">
-                Image loaded successfully!
-              </AlertDescription>
-            </Alert>
-          )}
-        </TabsContent>
-
-        {/* Upload Tab */}
-        <TabsContent value="upload" className="space-y-3">
-          <div className="relative">
-            <Input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              className="bg-slate-800 border-slate-700 text-white file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-orange-500 file:text-white hover:file:bg-orange-600"
-            />
-            <p className="text-xs text-slate-400 mt-2">
-              Select an image (JPG, PNG, GIF, WebP). The image will be embedded as a base64 data URL.
-            </p>
-          </div>
-          {selectedFile && (
-            <Alert className="bg-slate-800 border-green-500">
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
-              <AlertDescription className="text-green-300">
-                File selected: {selectedFile.name}
-              </AlertDescription>
-            </Alert>
-          )}
-        </TabsContent>
-      </Tabs>
-
-      {/* Image Preview + Edit Button */}
-      {previewUrl && (imageValid || selectedFile) && (
-        <div className="mt-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <Label className="text-slate-300">Preview</Label>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                renderEditorCanvas();
-                setEditorOpen(true);
-              }}
-              className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10 hover:text-orange-300"
-            >
-              <Crop className="w-4 h-4 mr-1" />
-              Edit Image
-            </Button>
-          </div>
-          <div className="relative w-full h-48 bg-slate-800 rounded-lg overflow-hidden border border-slate-700">
+      {imageValid && previewUrl && (
+        <div className="space-y-2">
+          <div className="relative bg-slate-800 rounded-lg overflow-hidden">
             <img
               src={previewUrl}
               alt="Preview"
-              className="w-full h-full object-contain"
-              onError={() => {
-                // Try weserv proxy on preview error
-                if (!previewUrl.includes('weserv.nl') && previewUrl.startsWith('http')) {
-                  const proxy = `https://images.weserv.nl/?url=${encodeURIComponent(previewUrl)}&output=jpg`;
-                  setPreviewUrl(proxy);
-                }
-              }}
+              className="w-full h-auto max-h-48 object-contain"
             />
+            <div className="absolute top-2 right-2">
+              <CheckCircle2 className="w-5 h-5 text-green-400" />
+            </div>
           </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setEditorOpen(true)}
+            className="w-full border-slate-700 text-slate-300"
+          >
+            Edit Image
+          </Button>
         </div>
       )}
 
-      {/* Hidden canvas for processing */}
-      <canvas ref={canvasRef} className="hidden" />
-
       {/* Image Editor Dialog */}
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="bg-slate-900 border-slate-700 max-w-3xl max-h-[95vh] overflow-y-auto">
+        <DialogContent className="bg-slate-900 border-slate-800 max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-white flex items-center gap-2">
-              <Crop className="w-5 h-5 text-orange-400" />
-              Image Editor – Crop, Resize & Transform
-            </DialogTitle>
+            <DialogTitle className="text-white">Edit Image</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* Canvas preview */}
-            <div
-              className="relative bg-slate-800 rounded-lg overflow-hidden flex items-center justify-center"
-              style={{ minHeight: 200 }}
-              onMouseMove={cropMode ? handleCropMouseMove : undefined}
-              onMouseUp={cropMode ? handleCropMouseUp : undefined}
-              onMouseLeave={cropMode ? handleCropMouseUp : undefined}
-            >
+            {/* Canvas Preview */}
+            <div className="bg-slate-800 rounded-lg p-4 flex justify-center">
               <canvas
                 ref={editorCanvasRef}
-                className="max-w-full rounded"
-                style={{ display: 'block' }}
+                className="max-w-full border border-slate-700 rounded"
               />
-
-              {/* Crop overlay */}
-              {cropMode && editorCanvasRef.current && (
-                <div
-                  className="absolute inset-0"
-                  style={{ pointerEvents: 'none' }}
-                >
-                  {/* Dark mask */}
-                  <div className="absolute inset-0 bg-black/50" />
-                  {/* Crop box */}
-                  <div
-                    className="absolute border-2 border-orange-400"
-                    style={{
-                      left: `${crop.x}%`,
-                      top: `${crop.y}%`,
-                      width: `${crop.width}%`,
-                      height: `${crop.height}%`,
-                      pointerEvents: 'all',
-                      cursor: 'move',
-                      background: 'transparent',
-                    }}
-                    onMouseDown={(e) => handleCropMouseDown(e, 'move')}
-                  >
-                    {/* Grid lines */}
-                    <div className="absolute inset-0" style={{
-                      backgroundImage: 'linear-gradient(rgba(249,115,22,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(249,115,22,0.3) 1px, transparent 1px)',
-                      backgroundSize: '33.33% 33.33%'
-                    }} />
-                    {/* Resize handles */}
-                    {['nw','n','ne','e','se','s','sw','w'].map(handle => {
-                      const pos: Record<string, React.CSSProperties> = {
-                        nw: { top: -4, left: -4 },
-                        n:  { top: -4, left: 'calc(50% - 4px)' },
-                        ne: { top: -4, right: -4 },
-                        e:  { top: 'calc(50% - 4px)', right: -4 },
-                        se: { bottom: -4, right: -4 },
-                        s:  { bottom: -4, left: 'calc(50% - 4px)' },
-                        sw: { bottom: -4, left: -4 },
-                        w:  { top: 'calc(50% - 4px)', left: -4 },
-                      };
-                      const cursors: Record<string, string> = {
-                        nw: 'nw-resize', n: 'n-resize', ne: 'ne-resize',
-                        e: 'e-resize', se: 'se-resize', s: 's-resize',
-                        sw: 'sw-resize', w: 'w-resize'
-                      };
-                      return (
-                        <div
-                          key={handle}
-                          className="absolute w-3 h-3 bg-orange-400 border-2 border-white rounded-sm"
-                          style={{ ...pos[handle], cursor: cursors[handle] }}
-                          onMouseDown={(e) => handleCropMouseDown(e, handle)}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
+
+            {/* Crop Preview Overlay */}
+            {cropMode && (
+              <div
+                className="relative bg-slate-800 rounded-lg overflow-hidden"
+                onMouseMove={handleCropMouseMove}
+                onMouseUp={handleCropMouseUp}
+                onMouseLeave={handleCropMouseUp}
+              >
+                <canvas
+                  ref={editorCanvasRef}
+                  className="w-full"
+                />
+                <div
+                  className="absolute border-2 border-orange-400 bg-orange-500/10 cursor-move"
+                  style={{
+                    left: `${crop.x}%`,
+                    top: `${crop.y}%`,
+                    width: `${crop.width}%`,
+                    height: `${crop.height}%`
+                  }}
+                  onMouseDown={(e) => handleCropMouseDown(e, 'move')}
+                >
+                  {['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(handle => {
+                    const pos: Record<string, any> = {
+                      nw: { top: -4, left: -4 },
+                      n:  { top: -4, left: 'calc(50% - 4px)' },
+                      ne: { top: -4, right: -4 },
+                      e:  { top: 'calc(50% - 4px)', right: -4 },
+                      se: { bottom: -4, right: -4 },
+                      s:  { bottom: -4, left: 'calc(50% - 4px)' },
+                      sw: { bottom: -4, left: -4 },
+                      w:  { top: 'calc(50% - 4px)', left: -4 },
+                    };
+                    const cursors: Record<string, string> = {
+                      nw: 'nw-resize', n: 'n-resize', ne: 'ne-resize',
+                      e: 'e-resize', se: 'se-resize', s: 's-resize',
+                      sw: 'sw-resize', w: 'w-resize'
+                    };
+                    return (
+                      <div
+                        key={handle}
+                        className="absolute w-3 h-3 bg-orange-400 border-2 border-white rounded-sm"
+                        style={{ ...pos[handle], cursor: cursors[handle] }}
+                        onMouseDown={(e) => handleCropMouseDown(e, handle)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Transform Controls */}
             <div className="grid grid-cols-2 gap-4">
@@ -580,6 +434,24 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
               </div>
             </div>
 
+            {/* Background Removal */}
+            {removeBgMode && (
+              <div className="space-y-2 bg-slate-800 p-3 rounded border border-slate-700">
+                <Label className="text-slate-300 text-sm flex items-center gap-1">
+                  <Wand2 className="w-4 h-4" /> Background Removal Tolerance: {bgRemovalTolerance}
+                </Label>
+                <Slider
+                  min={5}
+                  max={100}
+                  step={5}
+                  value={[bgRemovalTolerance]}
+                  onValueChange={([v]) => setBgRemovalTolerance(v)}
+                  className="w-full"
+                />
+                <p className="text-xs text-slate-400">Lower values = more precise, Higher values = more removal</p>
+              </div>
+            )}
+
             {/* Flip & Crop buttons */}
             <div className="flex flex-wrap gap-2">
               <Button type="button" size="sm" variant={flipH ? "default" : "outline"}
@@ -587,7 +459,7 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
                 className={flipH ? "bg-orange-500 hover:bg-orange-600" : "border-slate-700 text-slate-300"}>
                 <FlipHorizontal className="w-4 h-4 mr-1" /> Flip H
               </Button>
-              <Button type="button" size="sm" variant={flipV ? "default" : "outline"}
+              <Button type="button" size="sm" variant={flipH ? "default" : "outline"}
                 onClick={() => setFlipV(v => !v)}
                 className={flipV ? "bg-orange-500 hover:bg-orange-600" : "border-slate-700 text-slate-300"}>
                 <FlipVertical className="w-4 h-4 mr-1" /> Flip V
@@ -596,6 +468,11 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
                 onClick={() => setCropMode(v => !v)}
                 className={cropMode ? "bg-orange-500 hover:bg-orange-600" : "border-slate-700 text-slate-300"}>
                 <Crop className="w-4 h-4 mr-1" /> {cropMode ? 'Crop ON' : 'Crop'}
+              </Button>
+              <Button type="button" size="sm" variant={removeBgMode ? "default" : "outline"}
+                onClick={() => setRemoveBgMode(v => !v)}
+                className={removeBgMode ? "bg-orange-500 hover:bg-orange-600" : "border-slate-700 text-slate-300"}>
+                <Wand2 className="w-4 h-4 mr-1" /> {removeBgMode ? 'BG Remove ON' : 'Remove BG'}
               </Button>
               <Button type="button" size="sm" variant="outline"
                 onClick={handleResetEdits}
@@ -607,6 +484,12 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
             {cropMode && (
               <p className="text-xs text-orange-400 bg-orange-500/10 p-2 rounded border border-orange-500/30">
                 Drag the orange box to position the crop area. Drag the corner/edge handles to resize it. Click "Apply Edits" when done.
+              </p>
+            )}
+
+            {removeBgMode && (
+              <p className="text-xs text-blue-400 bg-blue-500/10 p-2 rounded border border-blue-500/30">
+                Background removal works best with solid-colored backgrounds. Adjust tolerance for better results.
               </p>
             )}
 

@@ -241,7 +241,6 @@ export default function AdminProducts() {
                     value={formData.image}
                     onChange={(value) => setFormData({ ...formData, image: value })}
                     label="Product Image"
-                    placeholder="https://example.com/image.jpg or /images/product.jpg"
                     required
                   />
                 </div>

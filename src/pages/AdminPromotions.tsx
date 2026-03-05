@@ -188,7 +188,6 @@ export default function AdminPromotions() {
                     value={formData.image}
                     onChange={(value) => setFormData({ ...formData, image: value })}
                     label="Banner Image"
-                    placeholder="https://example.com/banner.jpg or /images/banner.jpg"
                     required
                   />
                 </div>
