@@ -68,49 +68,40 @@ export default function AdminProducts() {
   };
 
   /**
-   * Converts a base64 data URL to a Firebase Storage URL.
-   * If the value is already an HTTPS URL, returns it unchanged (no re-upload needed).
+   * Converts a base64 data URL or File object to a Firebase Storage URL.
+   * If the value is already an HTTPS URL, returns it unchanged.
    */
-  const resolveImageUrl = async (imageValue: string, productId: string): Promise<string> => {
+  const resolveImageUrl = async (imageValue: any, productId: string): Promise<string> => {
     if (!imageValue) return '';
-    // Already an uploaded URL — return as-is (fast path, no upload needed)
-    if (imageValue.startsWith('http')) return imageValue;
+    if (typeof imageValue === 'string' && imageValue.startsWith('http')) return imageValue;
     
-    // base64 / data URL — upload to Firebase Storage
-    if (imageValue.startsWith('data:')) {
-      try {
-        console.log('Processing data URL for upload...');
+    try {
+      let fileToUpload: File;
+      
+      if (imageValue instanceof File) {
+        fileToUpload = imageValue;
+      } else if (typeof imageValue === 'string' && imageValue.startsWith('data:')) {
         const parts = imageValue.split(',');
-        if (parts.length < 2) throw new Error('Invalid image data');
-        
         const mimeMatch = imageValue.match(/data:([^;]+);/);
         const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
         const base64Data = parts[1];
-        
         const binaryString = atob(base64Data);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
         }
-        
         const blob = new Blob([bytes], { type: mimeType });
         const ext = mimeType.split('/')[1] || 'jpg';
-        const file = new File([blob], `product-${productId}-${Date.now()}.${ext}`, { type: mimeType });
-        
-        console.log('Starting uploadProductImage...');
-        // Add a timeout to the upload process to prevent infinite hanging
-        const uploadPromise = uploadProductImage(file, productId);
-        const timeoutPromise = new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Image upload timed out after 30 seconds')), 30000)
-        );
-        
-        return await Promise.race([uploadPromise, timeoutPromise]);
-      } catch (err: any) {
-        console.error('Error processing/uploading image:', err);
-        throw new Error(`Image Error: ${err.message || 'Failed to process image'}`);
+        fileToUpload = new File([blob], `product-${productId}-${Date.now()}.${ext}`, { type: mimeType });
+      } else {
+        return typeof imageValue === 'string' ? imageValue : '';
       }
+      
+      return await uploadProductImage(fileToUpload, productId);
+    } catch (err: any) {
+      console.error('Error uploading image:', err);
+      throw new Error(`Image Upload Failed: ${err.message}`);
     }
-    return imageValue;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

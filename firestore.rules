@@ -60,8 +60,8 @@ service cloud.firestore {
     
     // Reviews collection
     match /reviews/{reviewId} {
-      // Anyone can read verified reviews
-      allow read: if resource.data.verified == true;
+      // Anyone can read verified reviews, admins can read all
+      allow read: if (resource != null && resource.data.verified == true) || isActiveAdmin();
       
       // Anyone can create a review (from client site)
       allow create: if true;
