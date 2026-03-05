@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   getAllPromotions, 
   createPromotion, 
@@ -12,9 +12,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, Tag, Loader2, Calendar } from 'lucide-react';
+import { Plus, Edit, Trash2, Tag, Loader2, Calendar, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ImageInput } from '@/components/admin/ImageInput';
 
@@ -26,6 +26,7 @@ export default function AdminPromotions() {
   const [editingPromotion, setEditingPromotion] = useState<Promotion | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -41,6 +42,17 @@ export default function AdminPromotions() {
     loadPromotions();
   }, []);
 
+  // Auto-dismiss success after 4s
+  useEffect(() => {
+    if (success) {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      successTimerRef.current = setTimeout(() => setSuccess(''), 4000);
+    }
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    };
+  }, [success]);
+
   const loadPromotions = async () => {
     try {
       const data = await getAllPromotions();
@@ -55,10 +67,11 @@ export default function AdminPromotions() {
 
   /**
    * Converts a base64 data URL to a Firebase Storage URL.
-   * If the value is already an HTTPS URL, returns it unchanged.
+   * If the value is already an HTTPS URL, returns it unchanged (no re-upload needed = fast save).
    */
   const resolveImageUrl = async (imageValue: string, promoId: string): Promise<string> => {
     if (!imageValue) return '';
+    // Already uploaded — use directly, skip re-upload
     if (imageValue.startsWith('http')) return imageValue;
     if (imageValue.startsWith('data:')) {
       const blob = await (await fetch(imageValue)).blob();
@@ -95,13 +108,18 @@ export default function AdminPromotions() {
 
       if (editingPromotion) {
         await updatePromotion(editingPromotion.id, promoData);
+        // Optimistic update — immediately reflect in UI
+        setPromotions(prev =>
+          prev.map(p => p.id === editingPromotion.id ? { ...p, ...promoData, id: editingPromotion.id } : p)
+        );
         setSuccess('✅ Promotion updated successfully!');
       } else {
-        await createPromotion(promoData);
+        const newId = await createPromotion(promoData);
+        // Append to local state immediately — no full reload
+        setPromotions(prev => [...prev, { ...promoData, id: newId }]);
         setSuccess('✅ Promotion created successfully!');
       }
 
-      await loadPromotions();
       setDialogOpen(false);
       resetForm();
     } catch (err: any) {
@@ -132,7 +150,8 @@ export default function AdminPromotions() {
 
     try {
       await deletePromotion(id);
-      await loadPromotions();
+      // Optimistic remove
+      setPromotions(prev => prev.filter(p => p.id !== id));
       setSuccess('✅ Promotion deleted successfully');
     } catch (err: any) {
       setError(err.message || 'Delete failed');
@@ -171,132 +190,138 @@ export default function AdminPromotions() {
           <h2 className="text-3xl font-bold text-white mb-2">Promotion Management</h2>
           <p className="text-slate-400">Manage banners and special offers ({promotions.length} promotions)</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) resetForm();
-        }}>
-          <DialogTrigger asChild>
-            <Button
-              onClick={() => { resetForm(); setDialogOpen(true); }}
-              className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Promotion
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="bg-slate-900 border-slate-800 max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="text-white">
-                {editingPromotion ? `Edit Promotion: ${editingPromotion.title}` : 'Add New Promotion'}
-              </DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {error && (
-                <Alert variant="destructive" className="bg-red-950/50 border-red-900">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <Label className="text-slate-300">Title *</Label>
-                  <Input
-                    value={formData.title}
-                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white mt-1"
-                    placeholder="e.g., Summer Solar Sale"
-                    required
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <Label className="text-slate-300">Description *</Label>
-                  <Textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white mt-1"
-                    rows={3}
-                    placeholder="Enter promotion details..."
-                    required
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <ImageInput
-                    value={formData.image}
-                    onChange={(value) => setFormData({ ...formData, image: value })}
-                    label="Banner Image *"
-                  />
-                </div>
-
-                <div>
-                  <Label className="text-slate-300">Discount Label *</Label>
-                  <Input
-                    value={formData.discount}
-                    onChange={(e) => setFormData({ ...formData, discount: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white mt-1"
-                    placeholder="e.g., 15% OFF"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <Label className="text-slate-300">Promo Code</Label>
-                  <Input
-                    value={formData.code}
-                    onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                    className="bg-slate-800 border-slate-700 text-white mt-1"
-                    placeholder="e.g., SOLAR15 (optional)"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <Label className="text-slate-300">Valid Until *</Label>
-                  <Input
-                    type="date"
-                    value={formData.validUntil}
-                    onChange={(e) => setFormData({ ...formData, validUntil: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white mt-1"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2 justify-end pt-2 border-t border-slate-800">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => { setDialogOpen(false); resetForm(); }}
-                  disabled={submitting}
-                  className="border-slate-700 text-slate-300"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={submitting}
-                  className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white min-w-[160px]"
-                >
-                  {submitting ? (
-                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</>
-                  ) : (
-                    editingPromotion ? 'Update Promotion' : 'Create Promotion'
-                  )}
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <Button
+          onClick={() => { resetForm(); setDialogOpen(true); }}
+          className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white"
+        >
+          <Plus className="w-4 h-4 mr-2" />
+          Add Promotion
+        </Button>
       </div>
+
+      {/* Promotion Add/Edit Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={(open) => {
+        setDialogOpen(open);
+        if (!open) resetForm();
+      }}>
+        <DialogContent className="bg-slate-900 border-slate-800 max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-white">
+              {editingPromotion ? `Edit Promotion: ${editingPromotion.title}` : 'Add New Promotion'}
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <Alert variant="destructive" className="bg-red-950/50 border-red-900">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <Label className="text-slate-300">Title *</Label>
+                <Input
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  className="bg-slate-800 border-slate-700 text-white mt-1"
+                  placeholder="e.g., Summer Solar Sale"
+                  required
+                />
+              </div>
+
+              <div className="col-span-2">
+                <Label className="text-slate-300">Description *</Label>
+                <Textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className="bg-slate-800 border-slate-700 text-white mt-1"
+                  rows={3}
+                  placeholder="Enter promotion details..."
+                  required
+                />
+              </div>
+
+              <div className="col-span-2">
+                <ImageInput
+                  value={formData.image}
+                  onChange={(value) => setFormData({ ...formData, image: value })}
+                  label="Banner Image *"
+                />
+              </div>
+
+              <div>
+                <Label className="text-slate-300">Discount Label *</Label>
+                <Input
+                  value={formData.discount}
+                  onChange={(e) => setFormData({ ...formData, discount: e.target.value })}
+                  className="bg-slate-800 border-slate-700 text-white mt-1"
+                  placeholder="e.g., 15% OFF"
+                  required
+                />
+              </div>
+
+              <div>
+                <Label className="text-slate-300">Promo Code</Label>
+                <Input
+                  value={formData.code}
+                  onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                  className="bg-slate-800 border-slate-700 text-white mt-1"
+                  placeholder="e.g., SOLAR15 (optional)"
+                />
+              </div>
+
+              <div className="col-span-2">
+                <Label className="text-slate-300">Valid Until *</Label>
+                <Input
+                  type="date"
+                  value={formData.validUntil}
+                  onChange={(e) => setFormData({ ...formData, validUntil: e.target.value })}
+                  className="bg-slate-800 border-slate-700 text-white mt-1"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2 border-t border-slate-800">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setDialogOpen(false); resetForm(); }}
+                disabled={submitting}
+                className="border-slate-700 text-slate-300"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={submitting}
+                className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white min-w-[160px]"
+              >
+                {submitting ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</>
+                ) : (
+                  editingPromotion ? 'Update Promotion' : 'Create Promotion'
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {error && !dialogOpen && (
         <Alert variant="destructive" className="bg-red-950/50 border-red-900">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError('')} className="ml-2 text-red-300 hover:text-white"><X className="w-4 h-4" /></button>
+          </AlertDescription>
         </Alert>
       )}
 
       {success && (
         <Alert className="bg-green-950/50 border-green-900">
-          <AlertDescription className="text-green-400">{success}</AlertDescription>
+          <AlertDescription className="text-green-400 flex items-center justify-between">
+            <span>{success}</span>
+            <button onClick={() => setSuccess('')} className="ml-2 text-green-300 hover:text-white"><X className="w-4 h-4" /></button>
+          </AlertDescription>
         </Alert>
       )}
 
