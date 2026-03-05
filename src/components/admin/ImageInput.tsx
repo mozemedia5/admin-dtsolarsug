@@ -1,8 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
 import { Upload, AlertCircle, CheckCircle2, Crop, RotateCw, ZoomIn, ZoomOut, FlipHorizontal, FlipVertical, RefreshCw, Wand2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -12,7 +10,6 @@ interface ImageInputProps {
   value: string;
   onChange: (value: string) => void;
   label?: string;
-  placeholder?: string;
   required?: boolean;
 }
 
@@ -30,43 +27,51 @@ function removeBackgroundFromImage(imageData: ImageData, tolerance: number = 30)
   const data = imageData.data;
   const width = imageData.width;
   const height = imageData.height;
-  
-  // Get the background color (from corner pixel)
-  const bgR = data[0];
-  const bgG = data[1];
-  const bgB = data[2];
-  
+
+  // Sample background color from corners and edges for better detection
+  const cornerPixels = [
+    { r: data[0], g: data[1], b: data[2] },
+    { r: data[(width - 1) * 4], g: data[(width - 1) * 4 + 1], b: data[(width - 1) * 4 + 2] },
+    { r: data[(height - 1) * width * 4], g: data[(height - 1) * width * 4 + 1], b: data[(height - 1) * width * 4 + 2] },
+    { r: data[((height - 1) * width + (width - 1)) * 4], g: data[((height - 1) * width + (width - 1)) * 4 + 1], b: data[((height - 1) * width + (width - 1)) * 4 + 2] },
+  ];
+
+  // Average background color from all corners
+  const bgR = Math.round(cornerPixels.reduce((s, p) => s + p.r, 0) / cornerPixels.length);
+  const bgG = Math.round(cornerPixels.reduce((s, p) => s + p.g, 0) / cornerPixels.length);
+  const bgB = Math.round(cornerPixels.reduce((s, p) => s + p.b, 0) / cornerPixels.length);
+
   // Process each pixel
   for (let i = 0; i < data.length; i += 4) {
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
-    const a = data[i + 3];
-    
+
     // Check if pixel is similar to background color
     const colorDistance = Math.sqrt(
-      Math.pow(r - bgR, 2) + 
-      Math.pow(g - bgG, 2) + 
+      Math.pow(r - bgR, 2) +
+      Math.pow(g - bgG, 2) +
       Math.pow(b - bgB, 2)
     );
-    
-    if (colorDistance < tolerance * 2.5) {
-      // Make it transparent
+
+    const threshold = tolerance * 2.5;
+    if (colorDistance < threshold) {
+      // Make it fully transparent
       data[i + 3] = 0;
-    } else {
-      // Enhance edges for better transparency gradient
-      const edgeStrength = Math.min(255, Math.max(0, colorDistance - tolerance));
-      data[i + 3] = Math.round((edgeStrength / (tolerance * 2.5)) * 255);
+    } else if (colorDistance < threshold * 1.5) {
+      // Smooth edge transition
+      const alpha = Math.round(((colorDistance - threshold) / (threshold * 0.5)) * 255);
+      data[i + 3] = Math.min(255, Math.max(0, alpha));
     }
+    // else: keep original alpha (fully opaque)
   }
-  
+
   return imageData;
 }
 
-export function ImageInput({ value, onChange, label = "Image", placeholder, required }: ImageInputProps) {
+export function ImageInput({ value, onChange, label = "Image" }: ImageInputProps) {
   const [imageError, setImageError] = useState(false);
   const [imageValid, setImageValid] = useState(!!value);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>(value);
   const [resolvedUrl, setResolvedUrl] = useState<string>(value);
 
@@ -86,7 +91,24 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
   const [resizeHandle, setResizeHandle] = useState('');
 
   const editorCanvasRef = useRef<HTMLCanvasElement>(null);
+  const cropCanvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync value prop → preview when form is reset or editing an existing product/promo
+  useEffect(() => {
+    if (value && value !== previewUrl) {
+      setPreviewUrl(value);
+      setResolvedUrl(value);
+      setImageValid(true);
+      setImageError(false);
+    }
+    if (!value) {
+      setPreviewUrl('');
+      setResolvedUrl('');
+      setImageValid(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
 
   // Render editor canvas whenever transform state changes
   useEffect(() => {
@@ -128,13 +150,27 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
 
       // Apply background removal if enabled
       if (removeBgMode) {
-        const imageData = ctx.getImageData(0, 0, w, h);
-        const processedData = removeBackgroundFromImage(imageData, bgRemovalTolerance);
-        ctx.putImageData(processedData, 0, 0);
+        try {
+          const imageData = ctx.getImageData(0, 0, w, h);
+          const processedData = removeBackgroundFromImage(imageData, bgRemovalTolerance);
+          ctx.putImageData(processedData, 0, 0);
+        } catch (_e) {
+          // CORS issue — skip background removal silently
+        }
+      }
+
+      // Also update crop canvas if crop mode
+      if (cropMode && cropCanvasRef.current) {
+        const cropCanvas = cropCanvasRef.current;
+        const cropCtx = cropCanvas.getContext('2d');
+        if (cropCtx) {
+          cropCanvas.width = w;
+          cropCanvas.height = h;
+          cropCtx.drawImage(canvas, 0, 0);
+        }
       }
     };
     img.onerror = () => {
-      // fallback – draw placeholder
       const c = editorCanvasRef.current;
       if (!c) return;
       const cx = c.getContext('2d');
@@ -149,7 +185,7 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
       cx.fillText('Image preview unavailable', 240, 180);
     };
     img.src = resolvedUrl;
-  }, [resolvedUrl, zoom, rotation, flipH, flipV, removeBgMode, bgRemovalTolerance]);
+  }, [resolvedUrl, zoom, rotation, flipH, flipV, removeBgMode, bgRemovalTolerance, cropMode]);
 
   // Handle file upload
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -159,7 +195,6 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
       setImageError(true);
       return;
     }
-    setSelectedFile(file);
     const reader = new FileReader();
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
@@ -177,7 +212,7 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
     const canvas = editorCanvasRef.current;
     if (!canvas) return;
 
-    let finalCanvas = canvas;
+    let finalCanvas: HTMLCanvasElement = canvas;
 
     // If crop mode, apply crop
     if (cropMode) {
@@ -205,7 +240,7 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
     setEditorOpen(false);
     setCropMode(false);
     setRemoveBgMode(false);
-    // reset
+    // reset transforms
     setZoom(100);
     setRotation(0);
     setFlipH(false);
@@ -273,101 +308,144 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
   return (
     <div className="space-y-2">
       <Label className="text-slate-300">{label}</Label>
-      
+
       {imageError && (
         <Alert variant="destructive" className="bg-red-950/50 border-red-900">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>Invalid image file</AlertDescription>
+          <AlertDescription>Invalid image file. Please select a valid image (PNG, JPG, GIF, WEBP).</AlertDescription>
         </Alert>
       )}
 
+      {/* Upload area */}
       <div className="relative">
-        <div className="border-2 border-dashed border-slate-700 rounded-lg p-6 text-center bg-slate-800/50 hover:bg-slate-800 transition-colors">
-          <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-          <p className="text-sm text-slate-400 mb-2">Click to upload image</p>
-          <p className="text-xs text-slate-500">PNG, JPG, GIF up to 10MB</p>
+        <div
+          className="border-2 border-dashed border-slate-600 rounded-lg p-6 text-center bg-slate-800/50 hover:bg-slate-800 hover:border-orange-500/50 transition-colors cursor-pointer"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Upload className="w-8 h-8 text-orange-400 mx-auto mb-2" />
+          <p className="text-sm text-slate-300 mb-1 font-medium">Click to upload image</p>
+          <p className="text-xs text-slate-500">PNG, JPG, GIF, WEBP up to 10MB</p>
           <input
             ref={fileInputRef}
             type="file"
             accept="image/*"
             onChange={handleFileChange}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            className="hidden"
           />
         </div>
       </div>
 
+      {/* Preview + Edit button */}
       {imageValid && previewUrl && (
         <div className="space-y-2">
-          <div className="relative bg-slate-800 rounded-lg overflow-hidden">
+          <div className="relative bg-slate-800 rounded-lg overflow-hidden border border-slate-700">
             <img
               src={previewUrl}
               alt="Preview"
-              className="w-full h-auto max-h-48 object-contain"
+              className="w-full h-auto max-h-52 object-contain"
+              crossOrigin="anonymous"
             />
             <div className="absolute top-2 right-2">
-              <CheckCircle2 className="w-5 h-5 text-green-400" />
+              <CheckCircle2 className="w-5 h-5 text-green-400 drop-shadow" />
+            </div>
+            <div className="absolute bottom-2 left-2">
+              <span className="text-xs text-slate-400 bg-slate-900/70 px-2 py-1 rounded">Image selected ✓</span>
             </div>
           </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => setEditorOpen(true)}
-            className="w-full border-slate-700 text-slate-300"
-          >
-            Edit Image
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setEditorOpen(true)}
+              className="flex-1 border-slate-600 text-slate-300 hover:border-orange-500/50 hover:text-orange-400"
+            >
+              <Wand2 className="w-4 h-4 mr-2" />
+              Edit / Remove Background
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              className="border-slate-600 text-slate-400 hover:border-slate-500"
+            >
+              <Upload className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       )}
 
       {/* Image Editor Dialog */}
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="bg-slate-900 border-slate-800 max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="bg-slate-900 border-slate-800 max-w-2xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-white">Edit Image</DialogTitle>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <Wand2 className="w-5 h-5 text-orange-400" />
+              Image Editor
+            </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
             {/* Canvas Preview */}
-            <div className="bg-slate-800 rounded-lg p-4 flex justify-center">
+            <div className="bg-slate-800 rounded-lg p-4 flex justify-center relative overflow-hidden"
+              style={{ minHeight: '200px' }}>
+              {/* Checkerboard background to show transparency */}
+              <div className="absolute inset-0 opacity-20"
+                style={{
+                  backgroundImage: 'repeating-conic-gradient(#888 0% 25%, transparent 0% 50%)',
+                  backgroundSize: '20px 20px'
+                }} />
               <canvas
                 ref={editorCanvasRef}
-                className="max-w-full border border-slate-700 rounded"
+                className="max-w-full border border-slate-700 rounded relative z-10"
               />
             </div>
 
-            {/* Crop Preview Overlay */}
+            {/* Crop Overlay */}
             {cropMode && (
               <div
-                className="relative bg-slate-800 rounded-lg overflow-hidden"
+                className="relative bg-slate-800 rounded-lg overflow-hidden select-none"
+                style={{ minHeight: '200px' }}
                 onMouseMove={handleCropMouseMove}
                 onMouseUp={handleCropMouseUp}
                 onMouseLeave={handleCropMouseUp}
               >
                 <canvas
-                  ref={editorCanvasRef}
+                  ref={cropCanvasRef}
                   className="w-full"
                 />
+                {/* Dimmed overlay */}
+                <div className="absolute inset-0 bg-black/40" />
+                {/* Crop selection */}
                 <div
-                  className="absolute border-2 border-orange-400 bg-orange-500/10 cursor-move"
+                  className="absolute border-2 border-orange-400 cursor-move"
                   style={{
                     left: `${crop.x}%`,
                     top: `${crop.y}%`,
                     width: `${crop.width}%`,
-                    height: `${crop.height}%`
+                    height: `${crop.height}%`,
+                    boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)'
                   }}
                   onMouseDown={(e) => handleCropMouseDown(e, 'move')}
                 >
-                  {['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(handle => {
-                    const pos: Record<string, any> = {
-                      nw: { top: -4, left: -4 },
-                      n:  { top: -4, left: 'calc(50% - 4px)' },
-                      ne: { top: -4, right: -4 },
-                      e:  { top: 'calc(50% - 4px)', right: -4 },
-                      se: { bottom: -4, right: -4 },
-                      s:  { bottom: -4, left: 'calc(50% - 4px)' },
-                      sw: { bottom: -4, left: -4 },
-                      w:  { top: 'calc(50% - 4px)', left: -4 },
+                  {/* Grid lines */}
+                  <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-50">
+                    {Array.from({ length: 9 }).map((_, i) => (
+                      <div key={i} className="border border-white/30" />
+                    ))}
+                  </div>
+                  {/* Resize handles */}
+                  {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map(handle => {
+                    const pos: Record<string, React.CSSProperties> = {
+                      nw: { top: -5, left: -5 },
+                      n:  { top: -5, left: 'calc(50% - 5px)' },
+                      ne: { top: -5, right: -5 },
+                      e:  { top: 'calc(50% - 5px)', right: -5 },
+                      se: { bottom: -5, right: -5 },
+                      s:  { bottom: -5, left: 'calc(50% - 5px)' },
+                      sw: { bottom: -5, left: -5 },
+                      w:  { top: 'calc(50% - 5px)', left: -5 },
                     };
                     const cursors: Record<string, string> = {
                       nw: 'nw-resize', n: 'n-resize', ne: 'ne-resize',
@@ -378,7 +456,7 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
                       <div
                         key={handle}
                         className="absolute w-3 h-3 bg-orange-400 border-2 border-white rounded-sm"
-                        style={{ ...pos[handle], cursor: cursors[handle] }}
+                        style={{ ...pos[handle], cursor: cursors[handle], position: 'absolute' }}
                         onMouseDown={(e) => handleCropMouseDown(e, handle)}
                       />
                     );
@@ -392,7 +470,7 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
               {/* Zoom */}
               <div className="space-y-2">
                 <Label className="text-slate-300 text-sm flex items-center gap-1">
-                  <ZoomIn className="w-4 h-4" /> Zoom: {zoom}%
+                  <ZoomIn className="w-4 h-4 text-orange-400" /> Zoom: {zoom}%
                 </Label>
                 <Slider
                   min={25}
@@ -403,11 +481,13 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
                   className="w-full"
                 />
                 <div className="flex gap-1">
-                  <Button type="button" size="sm" variant="outline" className="flex-1 border-slate-700 text-slate-300 text-xs"
+                  <Button type="button" size="sm" variant="outline"
+                    className="flex-1 border-slate-700 text-slate-300 text-xs"
                     onClick={() => setZoom(v => Math.max(25, v - 10))}>
                     <ZoomOut className="w-3 h-3 mr-1" />-10%
                   </Button>
-                  <Button type="button" size="sm" variant="outline" className="flex-1 border-slate-700 text-slate-300 text-xs"
+                  <Button type="button" size="sm" variant="outline"
+                    className="flex-1 border-slate-700 text-slate-300 text-xs"
                     onClick={() => setZoom(v => Math.min(200, v + 10))}>
                     <ZoomIn className="w-3 h-3 mr-1" />+10%
                   </Button>
@@ -417,7 +497,7 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
               {/* Rotation */}
               <div className="space-y-2">
                 <Label className="text-slate-300 text-sm flex items-center gap-1">
-                  <RotateCw className="w-4 h-4" /> Rotation: {rotation}°
+                  <RotateCw className="w-4 h-4 text-orange-400" /> Rotation: {rotation}°
                 </Label>
                 <Slider
                   min={-180}
@@ -428,11 +508,13 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
                   className="w-full"
                 />
                 <div className="flex gap-1">
-                  <Button type="button" size="sm" variant="outline" className="flex-1 border-slate-700 text-slate-300 text-xs"
+                  <Button type="button" size="sm" variant="outline"
+                    className="flex-1 border-slate-700 text-slate-300 text-xs"
                     onClick={() => setRotation(v => v - 90)}>
                     -90°
                   </Button>
-                  <Button type="button" size="sm" variant="outline" className="flex-1 border-slate-700 text-slate-300 text-xs"
+                  <Button type="button" size="sm" variant="outline"
+                    className="flex-1 border-slate-700 text-slate-300 text-xs"
                     onClick={() => setRotation(v => v + 90)}>
                     +90°
                   </Button>
@@ -440,11 +522,11 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
               </div>
             </div>
 
-            {/* Background Removal */}
+            {/* Background Removal controls */}
             {removeBgMode && (
-              <div className="space-y-2 bg-slate-800 p-3 rounded border border-slate-700">
-                <Label className="text-slate-300 text-sm flex items-center gap-1">
-                  <Wand2 className="w-4 h-4" /> Background Removal Tolerance: {bgRemovalTolerance}
+              <div className="space-y-2 bg-blue-950/30 p-3 rounded-lg border border-blue-500/30">
+                <Label className="text-blue-300 text-sm flex items-center gap-1">
+                  <Wand2 className="w-4 h-4" /> Background Removal — Tolerance: {bgRemovalTolerance}
                 </Label>
                 <Slider
                   min={5}
@@ -454,48 +536,54 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
                   onValueChange={([v]) => setBgRemovalTolerance(v)}
                   className="w-full"
                 />
-                <p className="text-xs text-slate-400">Lower values = more precise, Higher values = more removal</p>
+                <p className="text-xs text-blue-400">
+                  ↑ Higher = removes more background &nbsp;|&nbsp; ↓ Lower = more precise selection
+                </p>
               </div>
             )}
 
-            {/* Flip & Crop buttons */}
+            {/* Tool buttons */}
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant={flipH ? "default" : "outline"}
+              <Button type="button" size="sm"
+                variant={flipH ? "default" : "outline"}
                 onClick={() => setFlipH(v => !v)}
-                className={flipH ? "bg-orange-500 hover:bg-orange-600" : "border-slate-700 text-slate-300"}>
+                className={flipH ? "bg-orange-500 hover:bg-orange-600 text-white" : "border-slate-700 text-slate-300"}>
                 <FlipHorizontal className="w-4 h-4 mr-1" /> Flip H
               </Button>
-              <Button type="button" size="sm" variant={flipV ? "default" : "outline"}
+              <Button type="button" size="sm"
+                variant={flipV ? "default" : "outline"}
                 onClick={() => setFlipV(v => !v)}
-                className={flipV ? "bg-orange-500 hover:bg-orange-600" : "border-slate-700 text-slate-300"}>
+                className={flipV ? "bg-orange-500 hover:bg-orange-600 text-white" : "border-slate-700 text-slate-300"}>
                 <FlipVertical className="w-4 h-4 mr-1" /> Flip V
               </Button>
-              <Button type="button" size="sm" variant={cropMode ? "default" : "outline"}
+              <Button type="button" size="sm"
+                variant={cropMode ? "default" : "outline"}
                 onClick={() => setCropMode(v => !v)}
-                className={cropMode ? "bg-orange-500 hover:bg-orange-600" : "border-slate-700 text-slate-300"}>
+                className={cropMode ? "bg-orange-500 hover:bg-orange-600 text-white" : "border-slate-700 text-slate-300"}>
                 <Crop className="w-4 h-4 mr-1" /> {cropMode ? 'Crop ON' : 'Crop'}
               </Button>
-              <Button type="button" size="sm" variant={removeBgMode ? "default" : "outline"}
+              <Button type="button" size="sm"
+                variant={removeBgMode ? "default" : "outline"}
                 onClick={() => setRemoveBgMode(v => !v)}
-                className={removeBgMode ? "bg-orange-500 hover:bg-orange-600" : "border-slate-700 text-slate-300"}>
-                <Wand2 className="w-4 h-4 mr-1" /> {removeBgMode ? 'BG Remove ON' : 'Remove BG'}
+                className={removeBgMode ? "bg-blue-600 hover:bg-blue-700 text-white" : "border-slate-700 text-slate-300"}>
+                <Wand2 className="w-4 h-4 mr-1" /> {removeBgMode ? 'Remove BG ON' : 'Remove BG'}
               </Button>
               <Button type="button" size="sm" variant="outline"
                 onClick={handleResetEdits}
-                className="border-slate-700 text-slate-300">
+                className="border-slate-700 text-slate-400">
                 <RefreshCw className="w-4 h-4 mr-1" /> Reset
               </Button>
             </div>
 
             {cropMode && (
               <p className="text-xs text-orange-400 bg-orange-500/10 p-2 rounded border border-orange-500/30">
-                Drag the orange box to position the crop area. Drag the corner/edge handles to resize it. Click "Apply Edits" when done.
+                💡 Drag the orange selection box to position. Drag corner/edge handles to resize. Click "Apply Edits" when done.
               </p>
             )}
 
             {removeBgMode && (
               <p className="text-xs text-blue-400 bg-blue-500/10 p-2 rounded border border-blue-500/30">
-                Background removal works best with solid-colored backgrounds. Adjust tolerance for better results.
+                💡 Remove Background works best on images with solid or uniform backgrounds. Adjust the tolerance slider for better results.
               </p>
             )}
 
@@ -508,7 +596,7 @@ export function ImageInput({ value, onChange, label = "Image", placeholder, requ
               </Button>
               <Button type="button"
                 onClick={handleApplyEdits}
-                className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600">
+                className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white">
                 Apply Edits
               </Button>
             </div>

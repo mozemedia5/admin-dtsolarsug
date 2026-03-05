@@ -22,6 +22,7 @@ import { ImageInput } from '@/components/admin/ImageInput';
 export default function AdminProducts() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [error, setError] = useState('');
@@ -46,12 +47,30 @@ export default function AdminProducts() {
     try {
       const data = await getAllProducts();
       setProducts(data);
-    } catch (error) {
-      console.error('Error loading products:', error);
+    } catch (err) {
+      console.error('Error loading products:', err);
       setError('Failed to load products');
     } finally {
       setLoading(false);
     }
+  };
+
+  /**
+   * Converts a base64 data URL to a Firebase Storage URL.
+   * If the value is already an HTTPS URL, returns it unchanged.
+   */
+  const resolveImageUrl = async (imageValue: string, productId: string): Promise<string> => {
+    if (!imageValue) return '';
+    // Already uploaded to storage or an external URL — use as-is
+    if (imageValue.startsWith('http')) return imageValue;
+    // base64 / data URL — upload to Firebase Storage
+    if (imageValue.startsWith('data:')) {
+      const blob = await (await fetch(imageValue)).blob();
+      const ext = blob.type === 'image/png' ? 'png' : 'jpg';
+      const file = new File([blob], `product-${productId}-${Date.now()}.${ext}`, { type: blob.type });
+      return await uploadProductImage(file, productId);
+    }
+    return imageValue;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -59,48 +78,53 @@ export default function AdminProducts() {
     setError('');
     setSuccess('');
 
+    if (!formData.image) {
+      setError('Please upload a product image.');
+      return;
+    }
+    if (!formData.category) {
+      setError('Please select a category.');
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      let imageUrl = formData.image;
+      // Use a stable ID for storage path: existing id or a temp one
+      const storageId = editingProduct?.id || `new-${Date.now()}`;
+      const imageUrl = await resolveImageUrl(formData.image, storageId);
 
-      // If image is a base64 data URL (from file upload), upload to Firebase Storage
-      if (imageUrl && imageUrl.startsWith('data:')) {
-        const blob = await (await fetch(imageUrl)).blob();
-        const file = new File([blob], `product-image-${Date.now()}.jpg`, { type: 'image/jpeg' });
-        const tempId = editingProduct?.id || `temp-${Date.now()}`;
-        imageUrl = await uploadProductImage(file, tempId);
-      }
-
-      const productData: any = {
-        ...formData,
-        image: imageUrl,
+      const productData: Omit<Product, 'id'> & { rating?: number; reviews?: number } = {
+        name: formData.name.trim(),
+        description: formData.description.trim(),
         price: Number(formData.price),
-        features: formData.features.split('\n').filter(f => f.trim()),
-        images: [imageUrl]
+        category: formData.category as Product['category'],
+        image: imageUrl,
+        images: [imageUrl],
+        inStock: formData.inStock,
+        features: formData.features
+          .split('\n')
+          .map(f => f.trim())
+          .filter(f => f.length > 0),
+        rating: editingProduct?.rating ?? 0,
+        reviews: editingProduct?.reviews ?? 0,
       };
 
       if (editingProduct) {
-        // Keep existing rating and reviews when editing (managed by customer reviews)
-        if (editingProduct.rating !== undefined) {
-          productData.rating = editingProduct.rating;
-        }
-        if (editingProduct.reviews !== undefined) {
-          productData.reviews = editingProduct.reviews;
-        }
         await updateProduct(editingProduct.id, productData);
-        setSuccess('Product updated successfully');
+        setSuccess('✅ Product updated successfully!');
       } else {
-        // Initialize rating and reviews for new products (will be updated by customer reviews)
-        productData.rating = 0;
-        productData.reviews = 0;
         await createProduct(productData);
-        setSuccess('Product created successfully');
+        setSuccess('✅ Product created successfully!');
       }
 
       await loadProducts();
-      resetForm();
       setDialogOpen(false);
+      resetForm();
     } catch (err: any) {
-      setError(err.message || 'Operation failed');
+      console.error('Product save error:', err);
+      setError(err.message || 'Operation failed. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -115,16 +139,18 @@ export default function AdminProducts() {
       inStock: product.inStock,
       features: product.features?.join('\n') || ''
     });
+    setError('');
+    setSuccess('');
     setDialogOpen(true);
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this product?')) return;
+    if (!confirm('Are you sure you want to delete this product? This action cannot be undone.')) return;
 
     try {
       await deleteProduct(id);
       await loadProducts();
-      setSuccess('Product deleted successfully');
+      setSuccess('✅ Product deleted successfully');
     } catch (err: any) {
       setError(err.message || 'Delete failed');
     }
@@ -132,6 +158,7 @@ export default function AdminProducts() {
 
   const resetForm = () => {
     setEditingProduct(null);
+    setError('');
     setFormData({
       name: '',
       description: '',
@@ -164,13 +191,16 @@ export default function AdminProducts() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold text-white mb-2">Product Management</h2>
-          <p className="text-slate-400">Manage your product catalog</p>
+          <p className="text-slate-400">Manage your product catalog ({products.length} products)</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog open={dialogOpen} onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) resetForm();
+        }}>
           <DialogTrigger asChild>
-            <Button 
-              onClick={resetForm}
-              className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
+            <Button
+              onClick={() => { resetForm(); setDialogOpen(true); }}
+              className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white"
             >
               <Plus className="w-4 h-4 mr-2" />
               Add Product
@@ -179,51 +209,60 @@ export default function AdminProducts() {
           <DialogContent className="bg-slate-900 border-slate-800 max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-white">
-                {editingProduct ? 'Edit Product' : 'Add New Product'}
+                {editingProduct ? `Edit Product: ${editingProduct.name}` : 'Add New Product'}
               </DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <Alert variant="destructive" className="bg-red-950/50 border-red-900">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
-                  <Label className="text-slate-300">Product Name</Label>
+                  <Label className="text-slate-300">Product Name *</Label>
                   <Input
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white"
+                    className="bg-slate-800 border-slate-700 text-white mt-1"
+                    placeholder="e.g., 5KW Solar Kit"
                     required
                   />
                 </div>
 
                 <div className="col-span-2">
-                  <Label className="text-slate-300">Description</Label>
+                  <Label className="text-slate-300">Description *</Label>
                   <Textarea
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white"
+                    className="bg-slate-800 border-slate-700 text-white mt-1"
                     rows={3}
+                    placeholder="Describe the product..."
                     required
                   />
                 </div>
 
                 <div>
-                  <Label className="text-slate-300">Price (UGX)</Label>
+                  <Label className="text-slate-300">Price (UGX) *</Label>
                   <Input
                     type="number"
+                    min="0"
                     value={formData.price}
                     onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white"
-                    placeholder="Enter price"
+                    className="bg-slate-800 border-slate-700 text-white mt-1"
+                    placeholder="e.g., 1500000"
                     required
                   />
                 </div>
 
                 <div>
-                  <Label className="text-slate-300">Category</Label>
-                  <Select 
-                    value={formData.category} 
+                  <Label className="text-slate-300">Category *</Label>
+                  <Select
+                    value={formData.category}
                     onValueChange={(value) => setFormData({ ...formData, category: value })}
+                    required
                   >
-                    <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
+                    <SelectTrigger className="bg-slate-800 border-slate-700 text-white mt-1">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent className="bg-slate-800 border-slate-700">
@@ -240,8 +279,7 @@ export default function AdminProducts() {
                   <ImageInput
                     value={formData.image}
                     onChange={(value) => setFormData({ ...formData, image: value })}
-                    label="Product Image"
-                    required
+                    label="Product Image *"
                   />
                 </div>
 
@@ -250,7 +288,7 @@ export default function AdminProducts() {
                   <Textarea
                     value={formData.features}
                     onChange={(e) => setFormData({ ...formData, features: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white"
+                    className="bg-slate-800 border-slate-700 text-white mt-1"
                     rows={4}
                     placeholder="Feature 1&#10;Feature 2&#10;Feature 3"
                   />
@@ -262,29 +300,32 @@ export default function AdminProducts() {
                     id="inStock"
                     checked={formData.inStock}
                     onChange={(e) => setFormData({ ...formData, inStock: e.target.checked })}
-                    className="w-4 h-4"
+                    className="w-4 h-4 accent-orange-500"
                   />
-                  <Label htmlFor="inStock" className="text-slate-300">In Stock</Label>
+                  <Label htmlFor="inStock" className="text-slate-300 cursor-pointer">In Stock</Label>
                 </div>
               </div>
 
-              <div className="flex gap-2 justify-end">
-                <Button 
-                  type="button" 
+              <div className="flex gap-2 justify-end pt-2 border-t border-slate-800">
+                <Button
+                  type="button"
                   variant="outline"
-                  onClick={() => {
-                    setDialogOpen(false);
-                    resetForm();
-                  }}
+                  onClick={() => { setDialogOpen(false); resetForm(); }}
+                  disabled={submitting}
                   className="border-slate-700 text-slate-300"
                 >
                   Cancel
                 </Button>
-                <Button 
+                <Button
                   type="submit"
-                  className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
+                  disabled={submitting}
+                  className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white min-w-[140px]"
                 >
-                  {editingProduct ? 'Update' : 'Create'} Product
+                  {submitting ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</>
+                  ) : (
+                    editingProduct ? 'Update Product' : 'Create Product'
+                  )}
                 </Button>
               </div>
             </form>
@@ -292,7 +333,7 @@ export default function AdminProducts() {
         </Dialog>
       </div>
 
-      {error && (
+      {error && !dialogOpen && (
         <Alert variant="destructive" className="bg-red-950/50 border-red-900">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
@@ -308,8 +349,8 @@ export default function AdminProducts() {
         {products.map((product) => (
           <Card key={product.id} className="bg-slate-900 border-slate-800 overflow-hidden">
             <div className="aspect-video w-full bg-slate-800 relative">
-              <img 
-                src={product.image} 
+              <img
+                src={product.image}
                 alt={product.name}
                 className="w-full h-full object-cover"
                 crossOrigin="anonymous"
@@ -344,15 +385,15 @@ export default function AdminProducts() {
             </CardHeader>
             <CardContent>
               <p className="text-slate-400 text-sm line-clamp-2 mb-4">{product.description}</p>
-              
-              {(product.rating !== undefined && product.reviews !== undefined && product.reviews > 0) && (
+
+              {(product.reviews !== undefined && product.reviews > 0) && (
                 <div className="flex items-center gap-4 mb-4 text-sm">
                   <div className="flex items-center gap-1 text-amber-500">
                     <Star className="w-4 h-4 fill-amber-500" />
                     <span>{product.rating?.toFixed(1) || '0.0'}</span>
                   </div>
                   <div className="text-slate-500">
-                    {product.reviews || 0} reviews
+                    {product.reviews} reviews
                   </div>
                 </div>
               )}
@@ -362,7 +403,7 @@ export default function AdminProducts() {
                   size="sm"
                   variant="outline"
                   onClick={() => handleEdit(product)}
-                  className="flex-1 border-slate-700 text-slate-300"
+                  className="flex-1 border-slate-700 text-slate-300 hover:border-orange-500/50 hover:text-orange-400"
                 >
                   <Edit className="w-4 h-4 mr-1" />
                   Edit

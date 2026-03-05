@@ -21,6 +21,7 @@ import { ImageInput } from '@/components/admin/ImageInput';
 export default function AdminPromotions() {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPromotion, setEditingPromotion] = useState<Promotion | null>(null);
   const [error, setError] = useState('');
@@ -44,12 +45,28 @@ export default function AdminPromotions() {
     try {
       const data = await getAllPromotions();
       setPromotions(data);
-    } catch (error) {
-      console.error('Error loading promotions:', error);
+    } catch (err) {
+      console.error('Error loading promotions:', err);
       setError('Failed to load promotions');
     } finally {
       setLoading(false);
     }
+  };
+
+  /**
+   * Converts a base64 data URL to a Firebase Storage URL.
+   * If the value is already an HTTPS URL, returns it unchanged.
+   */
+  const resolveImageUrl = async (imageValue: string, promoId: string): Promise<string> => {
+    if (!imageValue) return '';
+    if (imageValue.startsWith('http')) return imageValue;
+    if (imageValue.startsWith('data:')) {
+      const blob = await (await fetch(imageValue)).blob();
+      const ext = blob.type === 'image/png' ? 'png' : 'jpg';
+      const file = new File([blob], `promo-${promoId}-${Date.now()}.${ext}`, { type: blob.type });
+      return await uploadPromotionImage(file, promoId);
+    }
+    return imageValue;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,32 +74,41 @@ export default function AdminPromotions() {
     setError('');
     setSuccess('');
 
+    if (!formData.image) {
+      setError('Please upload a banner image for the promotion.');
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      let imageUrl = formData.image;
+      const storageId = editingPromotion?.id || `new-${Date.now()}`;
+      const imageUrl = await resolveImageUrl(formData.image, storageId);
 
-      // If image is a base64 data URL (from file upload), upload to Firebase Storage
-      if (imageUrl && imageUrl.startsWith('data:')) {
-        const blob = await (await fetch(imageUrl)).blob();
-        const file = new File([blob], `promo-image-${Date.now()}.jpg`, { type: 'image/jpeg' });
-        const tempId = editingPromotion?.id || `temp-${Date.now()}`;
-        imageUrl = await uploadPromotionImage(file, tempId);
-      }
-
-      const promoData = { ...formData, image: imageUrl };
+      const promoData: Omit<Promotion, 'id'> = {
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        image: imageUrl,
+        discount: formData.discount.trim(),
+        validUntil: formData.validUntil,
+        code: formData.code.trim().toUpperCase() || undefined
+      };
 
       if (editingPromotion) {
         await updatePromotion(editingPromotion.id, promoData);
-        setSuccess('Promotion updated successfully');
+        setSuccess('✅ Promotion updated successfully!');
       } else {
         await createPromotion(promoData);
-        setSuccess('Promotion created successfully');
+        setSuccess('✅ Promotion created successfully!');
       }
 
       await loadPromotions();
-      resetForm();
       setDialogOpen(false);
+      resetForm();
     } catch (err: any) {
-      setError(err.message || 'Operation failed');
+      console.error('Promotion save error:', err);
+      setError(err.message || 'Operation failed. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -96,16 +122,18 @@ export default function AdminPromotions() {
       validUntil: promotion.validUntil,
       code: promotion.code || ''
     });
+    setError('');
+    setSuccess('');
     setDialogOpen(true);
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this promotion?')) return;
+    if (!confirm('Are you sure you want to delete this promotion? This cannot be undone.')) return;
 
     try {
       await deletePromotion(id);
       await loadPromotions();
-      setSuccess('Promotion deleted successfully');
+      setSuccess('✅ Promotion deleted successfully');
     } catch (err: any) {
       setError(err.message || 'Delete failed');
     }
@@ -113,6 +141,7 @@ export default function AdminPromotions() {
 
   const resetForm = () => {
     setEditingPromotion(null);
+    setError('');
     setFormData({
       title: '',
       description: '',
@@ -140,43 +169,51 @@ export default function AdminPromotions() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold text-white mb-2">Promotion Management</h2>
-          <p className="text-slate-400">Manage banners and special offers</p>
+          <p className="text-slate-400">Manage banners and special offers ({promotions.length} promotions)</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog open={dialogOpen} onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) resetForm();
+        }}>
           <DialogTrigger asChild>
-            <Button 
-              onClick={resetForm}
-              className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
+            <Button
+              onClick={() => { resetForm(); setDialogOpen(true); }}
+              className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white"
             >
               <Plus className="w-4 h-4 mr-2" />
               Add Promotion
             </Button>
           </DialogTrigger>
-          <DialogContent className="bg-slate-900 border-slate-800 max-w-2xl">
+          <DialogContent className="bg-slate-900 border-slate-800 max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-white">
-                {editingPromotion ? 'Edit Promotion' : 'Add New Promotion'}
+                {editingPromotion ? `Edit Promotion: ${editingPromotion.title}` : 'Add New Promotion'}
               </DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <Alert variant="destructive" className="bg-red-950/50 border-red-900">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
-                  <Label className="text-slate-300">Title</Label>
+                  <Label className="text-slate-300">Title *</Label>
                   <Input
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white"
-                    placeholder="e.g., Summer Sale"
+                    className="bg-slate-800 border-slate-700 text-white mt-1"
+                    placeholder="e.g., Summer Solar Sale"
                     required
                   />
                 </div>
 
                 <div className="col-span-2">
-                  <Label className="text-slate-300">Description</Label>
+                  <Label className="text-slate-300">Description *</Label>
                   <Textarea
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white"
+                    className="bg-slate-800 border-slate-700 text-white mt-1"
                     rows={3}
                     placeholder="Enter promotion details..."
                     required
@@ -187,17 +224,16 @@ export default function AdminPromotions() {
                   <ImageInput
                     value={formData.image}
                     onChange={(value) => setFormData({ ...formData, image: value })}
-                    label="Banner Image"
-                    required
+                    label="Banner Image *"
                   />
                 </div>
 
                 <div>
-                  <Label className="text-slate-300">Discount Label</Label>
+                  <Label className="text-slate-300">Discount Label *</Label>
                   <Input
                     value={formData.discount}
                     onChange={(e) => setFormData({ ...formData, discount: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white"
+                    className="bg-slate-800 border-slate-700 text-white mt-1"
                     placeholder="e.g., 15% OFF"
                     required
                   />
@@ -208,41 +244,43 @@ export default function AdminPromotions() {
                   <Input
                     value={formData.code}
                     onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                    className="bg-slate-800 border-slate-700 text-white"
-                    placeholder="e.g., PROMO15"
-                    required
+                    className="bg-slate-800 border-slate-700 text-white mt-1"
+                    placeholder="e.g., SOLAR15 (optional)"
                   />
                 </div>
 
                 <div className="col-span-2">
-                  <Label className="text-slate-300">Valid Until</Label>
+                  <Label className="text-slate-300">Valid Until *</Label>
                   <Input
                     type="date"
                     value={formData.validUntil}
                     onChange={(e) => setFormData({ ...formData, validUntil: e.target.value })}
-                    className="bg-slate-800 border-slate-700 text-white"
+                    className="bg-slate-800 border-slate-700 text-white mt-1"
                     required
                   />
                 </div>
               </div>
 
-              <div className="flex gap-2 justify-end">
-                <Button 
-                  type="button" 
+              <div className="flex gap-2 justify-end pt-2 border-t border-slate-800">
+                <Button
+                  type="button"
                   variant="outline"
-                  onClick={() => {
-                    setDialogOpen(false);
-                    resetForm();
-                  }}
+                  onClick={() => { setDialogOpen(false); resetForm(); }}
+                  disabled={submitting}
                   className="border-slate-700 text-slate-300"
                 >
                   Cancel
                 </Button>
-                <Button 
+                <Button
                   type="submit"
-                  className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
+                  disabled={submitting}
+                  className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white min-w-[160px]"
                 >
-                  {editingPromotion ? 'Update' : 'Create'} Promotion
+                  {submitting ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</>
+                  ) : (
+                    editingPromotion ? 'Update Promotion' : 'Create Promotion'
+                  )}
                 </Button>
               </div>
             </form>
@@ -250,7 +288,7 @@ export default function AdminPromotions() {
         </Dialog>
       </div>
 
-      {error && (
+      {error && !dialogOpen && (
         <Alert variant="destructive" className="bg-red-950/50 border-red-900">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
@@ -266,8 +304,8 @@ export default function AdminPromotions() {
         {promotions.map((promotion) => (
           <Card key={promotion.id} className="bg-slate-900 border-slate-800 overflow-hidden">
             <div className="aspect-[21/9] w-full bg-slate-800 relative">
-              <img 
-                src={promotion.image} 
+              <img
+                src={promotion.image}
                 alt={promotion.title}
                 className="w-full h-full object-cover"
                 crossOrigin="anonymous"
@@ -292,18 +330,20 @@ export default function AdminPromotions() {
             <CardHeader>
               <div className="flex items-start justify-between">
                 <CardTitle className="text-white text-lg">{promotion.title}</CardTitle>
-                <span className="text-orange-500 font-bold">{promotion.discount}</span>
+                <span className="text-orange-500 font-bold ml-2 shrink-0">{promotion.discount}</span>
               </div>
             </CardHeader>
             <CardContent>
               <p className="text-slate-400 text-sm mb-4 line-clamp-2">{promotion.description}</p>
               <div className="space-y-2 mb-4">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-500 flex items-center gap-1">
-                    <Tag className="w-3 h-3" /> Code:
-                  </span>
-                  <Badge variant="outline" className="font-mono border-slate-700 text-slate-300">{promotion.code}</Badge>
-                </div>
+                {promotion.code && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-500 flex items-center gap-1">
+                      <Tag className="w-3 h-3" /> Code:
+                    </span>
+                    <Badge variant="outline" className="font-mono border-slate-700 text-slate-300">{promotion.code}</Badge>
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-500 flex items-center gap-1">
                     <Calendar className="w-3 h-3" /> Valid Until:
@@ -316,7 +356,7 @@ export default function AdminPromotions() {
                   size="sm"
                   variant="outline"
                   onClick={() => handleEdit(promotion)}
-                  className="flex-1 border-slate-700 text-slate-300"
+                  className="flex-1 border-slate-700 text-slate-300 hover:border-orange-500/50 hover:text-orange-400"
                 >
                   <Edit className="w-4 h-4 mr-1" />
                   Edit

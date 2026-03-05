@@ -106,7 +106,7 @@ export const isSuperAdmin = async (uid: string): Promise<boolean> => {
 
 /**
  * Create a new admin user (only super admin can do this)
- * Updated to use 'administrators' collection
+ * Uses Firebase REST API so the current session is NOT disrupted.
  */
 export const createAdminUser = async (
   email: string,
@@ -121,13 +121,32 @@ export const createAdminUser = async (
   }
 
   try {
-    // Create Firebase Auth user
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const newUser = userCredential.user;
+    // Use Firebase Auth REST API to create user without switching sessions
+    const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, returnSecureToken: false })
+      }
+    );
+
+    if (!response.ok) {
+      const errData = await response.json();
+      throw new Error(errData?.error?.message || 'Failed to create user account');
+    }
+
+    const data = await response.json();
+    const newUid = data.localId;
+
+    if (!newUid) {
+      throw new Error('Failed to retrieve new user ID');
+    }
 
     // Create admin record in Firestore 'administrators' collection
     const adminData: AdminUser = {
-      uid: newUser.uid,
+      uid: newUid,
       email: email,
       name: name,
       isSuperAdmin: false,
@@ -136,10 +155,8 @@ export const createAdminUser = async (
       createdBy: createdByUid
     };
 
-    await setDoc(doc(db, 'administrators', newUser.uid), adminData);
-
-    // Sign out the newly created user (so the super admin stays logged in)
-    await signOut(auth);
+    await setDoc(doc(db, 'administrators', newUid), adminData);
+    // Current super-admin session is untouched ✓
   } catch (error: any) {
     throw new Error(error.message || 'Failed to create admin user');
   }

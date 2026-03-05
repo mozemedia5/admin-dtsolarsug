@@ -72,15 +72,18 @@ export const deleteProduct = async (id: string): Promise<void> => {
 
 /**
  * Upload product image to Firebase Storage
+ * Uses timestamp + original filename for uniqueness
  */
 export const uploadProductImage = async (file: File, productId: string): Promise<string> => {
   try {
-    const storageRef = ref(storage, `products/${productId}/${file.name}`);
+    const timestamp = Date.now();
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storageRef = ref(storage, `products/${productId}/${timestamp}_${safeName}`);
     await uploadBytes(storageRef, file);
     const downloadURL = await getDownloadURL(storageRef);
     return downloadURL;
   } catch (error: any) {
-    throw new Error(error.message || 'Failed to upload image');
+    throw new Error(error.message || 'Failed to upload product image');
   }
 };
 
@@ -143,15 +146,18 @@ export const deletePromotion = async (id: string): Promise<void> => {
 
 /**
  * Upload promotion banner to Firebase Storage
+ * Uses timestamp + original filename for uniqueness
  */
 export const uploadPromotionImage = async (file: File, promotionId: string): Promise<string> => {
   try {
-    const storageRef = ref(storage, `promotions/${promotionId}/${file.name}`);
+    const timestamp = Date.now();
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storageRef = ref(storage, `promotions/${promotionId}/${timestamp}_${safeName}`);
     await uploadBytes(storageRef, file);
     const downloadURL = await getDownloadURL(storageRef);
     return downloadURL;
   } catch (error: any) {
-    throw new Error(error.message || 'Failed to upload image');
+    throw new Error(error.message || 'Failed to upload promotion image');
   }
 };
 
